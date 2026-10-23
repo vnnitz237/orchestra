@@ -106,6 +106,15 @@ async def process_order(order_id: str) -> None:
             })
             task_ids.append(task_id)
 
+        autonomy = project['autonomy'] if project else 'delegated'
+        if autonomy == 'planning':
+            await conn.execute(
+                'UPDATE "order" SET status=$1, updated_at=NOW() WHERE id=$2',
+                'awaiting_approval', order_id)
+            await broadcast(project_id, {"type": "order_updated", "order_id": order_id, "status": "awaiting_approval"})
+            logger.info(f"Order {order_id} awaiting human approval (planning mode)")
+            return
+
         await conn.execute(
             'UPDATE "order" SET status=$1, updated_at=NOW() WHERE id=$2',
             'executing', order_id)

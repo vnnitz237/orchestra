@@ -5,6 +5,8 @@ CREATE TABLE IF NOT EXISTS project (
     name        TEXT NOT NULL,
     description TEXT,
     github_repo TEXT,
+    autonomy    TEXT NOT NULL DEFAULT 'delegated',  -- planning | supervised | delegated
+    budget_usd  DECIMAL(10,2),                       -- NULL = unlimited
     status      TEXT NOT NULL DEFAULT 'active',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

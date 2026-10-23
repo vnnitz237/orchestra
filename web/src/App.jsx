@@ -22,12 +22,13 @@ function Avatar({ name, size = 44 }) {
 }
 
 const STATUS_META = {
-  pending:   { label: 'Pending',   bg: '#f1f1f4', fg: '#6b7280' },
-  analyzing: { label: 'Analyzing', bg: '#fef3c7', fg: '#d97706' },
-  executing: { label: 'Executing', bg: '#dbeafe', fg: '#2563eb' },
-  completed: { label: 'Done',      bg: '#d1fae5', fg: '#059669' },
-  failed:    { label: 'Failed',    bg: '#fee2e2', fg: '#dc2626' },
-  blocked:   { label: 'Blocked',   bg: '#ffedd5', fg: '#ea580c' },
+  pending:           { label: 'Pending',           bg: '#f1f1f4', fg: '#6b7280' },
+  analyzing:         { label: 'Analyzing',         bg: '#fef3c7', fg: '#d97706' },
+  executing:         { label: 'Executing',         bg: '#dbeafe', fg: '#2563eb' },
+  completed:         { label: 'Done',              bg: '#d1fae5', fg: '#059669' },
+  failed:            { label: 'Failed',            bg: '#fee2e2', fg: '#dc2626' },
+  blocked:           { label: 'Blocked',           bg: '#ffedd5', fg: '#ea580c' },
+  awaiting_approval: { label: 'Awaiting Approval', bg: '#f3e8ff', fg: '#7c3aed' },
 }
 
 function Pill({ status }) {
@@ -61,7 +62,7 @@ function ArtifactModal({ artifact, onClose }) {
   )
 }
 
-function TaskRow({ task }) {
+function TaskRow({ task, onRetry }) {
   const statusColor = task.status === 'completed' ? '#059669' : task.status === 'executing' ? '#2563eb' : task.status === 'failed' ? '#dc2626' : '#9ca3af'
   const icon = task.status === 'completed' ? '✓' : task.status === 'executing' ? '◌' : task.status === 'failed' ? '✗' : '○'
   return (
@@ -77,6 +78,9 @@ function TaskRow({ task }) {
             <a className="pr-link" href={task.github_pr_url} target="_blank" rel="noreferrer">
               View PR on GitHub
             </a>
+          )}
+          {task.status === 'failed' && onRetry && (
+            <button className="btn-retry" onClick={() => onRetry(task.id)}>↺ Retry</button>
           )}
         </div>
       </div>
@@ -106,7 +110,7 @@ function ActivityFeed({ logs }) {
   )
 }
 
-function OrderCard({ order, tasks, costs, expanded, onExpand }) {
+function OrderCard({ order, tasks, costs, expanded, onExpand, onApprove, onRetry }) {
   const taskList = tasks[order.id] || []
   const done = taskList.filter(t => t.status === 'completed').length
   const agentName = 'Coordinator'
@@ -143,10 +147,16 @@ function OrderCard({ order, tasks, costs, expanded, onExpand }) {
               {cost.total_tokens.toLocaleString()} tokens · ${Number(cost.total_cost).toFixed(4)} · {cost.executions} execution(s)
             </div>
           )}
+          {order.status === 'awaiting_approval' && (
+            <div className="approve-bar">
+              <span className="approve-msg">O coordenador planejou {taskList.length} tarefas. Aprovar execução?</span>
+              <button className="btn-approve" onClick={() => onApprove(order.id)}>✓ Aprovar e Executar</button>
+            </div>
+          )}
           {taskList.length === 0 && order.status === 'pending' && (
             <p className="order-waiting">Waiting for coordinator...</p>
           )}
-          {taskList.map(t => <TaskRow key={t.id} task={t} />)}
+          {taskList.map(t => <TaskRow key={t.id} task={t} onRetry={onRetry} />)}
         </div>
       )}
     </div>
@@ -166,11 +176,14 @@ export default function App() {
   const [selectedArtifact, setSelectedArtifact] = useState(null)
   const [showNewProject, setShowNewProject] = useState(false)
   const [showNewOrder, setShowNewOrder] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectDesc, setNewProjectDesc] = useState('')
   const [newProjectRepo, setNewProjectRepo] = useState('')
   const [newOrderTitle, setNewOrderTitle] = useState('')
   const [newOrderDesc, setNewOrderDesc] = useState('')
+  const [settingsAutonomy, setSettingsAutonomy] = useState('delegated')
+  const [settingsBudget, setSettingsBudget] = useState('')
   const wsRef = useRef(null)
 
   const loadOrderCost = async (orderId) => {
@@ -250,6 +263,50 @@ export default function App() {
       }
     }
     wsRef.current = ws
+  }
+
+  const openSettings = (p) => {
+    setSettingsAutonomy(p.autonomy || 'delegated')
+    setSettingsBudget(p.budget_usd != null ? String(p.budget_usd) : '')
+    setShowSettings(true)
+  }
+
+  const saveSettings = async () => {
+    if (!project) return
+    const body = {
+      autonomy: settingsAutonomy,
+      budget_usd: settingsBudget.trim() ? parseFloat(settingsBudget) : null,
+    }
+    const res = await fetch(`/api/projects/${project.id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    const updated = await res.json()
+    setProject(updated)
+    setShowSettings(false)
+  }
+
+  const approveOrder = async (orderId) => {
+    const res = await fetch(`/api/orders/${orderId}/approve`, { method: 'POST' })
+    if (res.ok) {
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'executing' } : o))
+    }
+  }
+
+  const retryTask = async (taskId) => {
+    const res = await fetch(`/api/tasks/${taskId}/retry`, { method: 'POST' })
+    if (res.ok) {
+      setTasks(prev => {
+        const next = {}
+        for (const [k, v] of Object.entries(prev)) {
+          next[k] = v.map(t => t.id === taskId ? { ...t, status: 'pending' } : t)
+        }
+        return next
+      })
+    } else {
+      const err = await res.json().catch(() => ({}))
+      alert(err.detail || 'Retry failed')
+    }
   }
 
   const createProject = async () => {
@@ -341,7 +398,10 @@ export default function App() {
           try { localStorage.removeItem('orchestra_project') } catch {}
         }}>← Projects</button>
         <div className="logo">{project?.name}</div>
-        <button className="btn-primary" onClick={() => setShowNewOrder(true)}>+ New Order</button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn-ghost" onClick={() => openSettings(project)}>⚙ Settings</button>
+          <button className="btn-primary" onClick={() => setShowNewOrder(true)}>+ New Order</button>
+        </div>
       </header>
 
       {showNewOrder && (
@@ -366,6 +426,35 @@ export default function App() {
         <ArtifactModal artifact={selectedArtifact} onClose={() => setSelectedArtifact(null)} />
       )}
 
+      {showSettings && project && (
+        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Project Settings</span>
+              <button className="btn-icon" onClick={() => setShowSettings(false)}>✕</button>
+            </div>
+            <div className="form-body">
+              <label style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Autonomy Mode</label>
+              <select className="input" value={settingsAutonomy} onChange={e => setSettingsAutonomy(e.target.value)}>
+                <option value="delegated">Delegated — agents run automatically</option>
+                <option value="supervised">Supervised — monitor but no approval needed</option>
+                <option value="planning">Planning — approve task plan before execution</option>
+              </select>
+              <label style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Budget Limit (USD)</label>
+              <input className="input" type="number" min="0" step="0.01"
+                placeholder="Leave empty for unlimited"
+                value={settingsBudget} onChange={e => setSettingsBudget(e.target.value)} />
+              {project.total_cost > 0 && (
+                <div style={{ fontSize: '0.8rem', color: 'var(--fg2)' }}>
+                  Spent so far: ${Number(project.total_cost).toFixed(4)}
+                </div>
+              )}
+              <button className="btn-primary" onClick={saveSettings}>Save Settings</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <main className="main-content two-col">
         <section className="orders-section">
           {orders.length === 0 ? (
@@ -375,7 +464,9 @@ export default function App() {
           ) : orders.map(o => (
             <OrderCard key={o.id} order={o} tasks={tasks} costs={costs}
               expanded={!!expandedOrders[o.id]}
-              onExpand={() => setExpandedOrders(prev => ({ ...prev, [o.id]: !prev[o.id] }))} />
+              onExpand={() => setExpandedOrders(prev => ({ ...prev, [o.id]: !prev[o.id] }))}
+              onApprove={approveOrder}
+              onRetry={retryTask} />
           ))}
         </section>
 

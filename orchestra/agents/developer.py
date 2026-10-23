@@ -49,6 +49,24 @@ async def execute_task(task_id: str, project_id: str) -> None:
         order = await conn.fetchrow('SELECT * FROM "order" WHERE id=$1', task['order_id'])
         project = await conn.fetchrow("SELECT * FROM project WHERE id=$1", project_id)
 
+        model = task.get('model') or _DEFAULT_MODEL
+        pricing = _MODEL_PRICING.get(model, _MODEL_PRICING[_DEFAULT_MODEL])
+
+        # Budget check before consuming tokens
+        if project and project['budget_usd']:
+            spent = await conn.fetchval("""
+                SELECT COALESCE(SUM(e.cost_usd),0) FROM execution e
+                JOIN task t ON t.id = e.task_id
+                JOIN "order" o ON o.id = t.order_id
+                WHERE o.project_id=$1 AND e.status='completed'
+            """, project_id)
+            if float(spent or 0) >= float(project['budget_usd']):
+                await conn.execute("UPDATE task SET status='failed', updated_at=NOW() WHERE id=$1", task_id)
+                await broadcast(project_id, {"type": "task_updated", "task_id": task_id, "status": "failed"})
+                await broadcast(project_id, {"type": "activity", "task_id": task_id,
+                    "msg": f"Budget limit ${project['budget_usd']} reached — task skipped"})
+                return
+
         await conn.execute("UPDATE task SET status='executing', updated_at=NOW() WHERE id=$1", task_id)
         await broadcast(project_id, {"type": "task_updated", "task_id": task_id, "status": "executing"})
         await broadcast(project_id, {"type": "activity", "task_id": task_id, "msg": f"Developer starting [{model.split('-')[1]}]: {task['title']}"})
@@ -65,8 +83,6 @@ async def execute_task(task_id: str, project_id: str) -> None:
         github_repo = project['github_repo'] if project else None
         order_title = order['title'] if order else ""
         order_id = str(task['order_id'])
-        model = task.get('model') or _DEFAULT_MODEL
-        pricing = _MODEL_PRICING.get(model, _MODEL_PRICING[_DEFAULT_MODEL])
 
         repo_hint = f" (GitHub: {github_repo})" if github_repo else ""
         user_prompt = (

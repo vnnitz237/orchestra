@@ -40,6 +40,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(
             "ALTER TABLE task ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT 'claude-sonnet-4-5'"
         )
+        await conn.execute(
+            "ALTER TABLE project ADD COLUMN IF NOT EXISTS autonomy TEXT NOT NULL DEFAULT 'delegated'"
+        )
+        await conn.execute(
+            "ALTER TABLE project ADD COLUMN IF NOT EXISTS budget_usd DECIMAL(10,2)"
+        )
     asyncio.create_task(redis_relay())
     yield
     await close_pool()
@@ -51,6 +57,15 @@ class ProjectCreate(BaseModel):
     name: str
     description: Optional[str] = None
     github_repo: Optional[str] = None
+    autonomy: Optional[str] = "delegated"
+    budget_usd: Optional[float] = None
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    github_repo: Optional[str] = None
+    autonomy: Optional[str] = None
+    budget_usd: Optional[float] = None
 
 class OrderCreate(BaseModel):
     title: str
@@ -70,12 +85,30 @@ async def list_projects():
 
 @app.post("/api/projects", status_code=201)
 async def create_project(body: ProjectCreate):
+    autonomy = body.autonomy if body.autonomy in ('planning', 'supervised', 'delegated') else 'delegated'
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "INSERT INTO project (name, description, github_repo) VALUES ($1,$2,$3) RETURNING *",
-            body.name, body.description, body.github_repo)
+            "INSERT INTO project (name, description, github_repo, autonomy, budget_usd) VALUES ($1,$2,$3,$4,$5) RETURNING *",
+            body.name, body.description, body.github_repo, autonomy, body.budget_usd)
         return dict(row)
+
+@app.patch("/api/projects/{project_id}")
+async def update_project(project_id: str, body: ProjectUpdate):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow("SELECT * FROM project WHERE id=$1", project_id)
+        if not row:
+            raise HTTPException(404, "Not found")
+        name = body.name if body.name is not None else row['name']
+        desc = body.description if body.description is not None else row['description']
+        repo = body.github_repo if body.github_repo is not None else row['github_repo']
+        autonomy = body.autonomy if body.autonomy in ('planning','supervised','delegated') else row['autonomy']
+        budget = body.budget_usd if body.budget_usd is not None else row['budget_usd']
+        updated = await conn.fetchrow(
+            "UPDATE project SET name=$1, description=$2, github_repo=$3, autonomy=$4, budget_usd=$5 WHERE id=$6 RETURNING *",
+            name, desc, repo, autonomy, budget, project_id)
+        return dict(updated)
 
 @app.get("/api/projects/{project_id}")
 async def get_project(project_id: str):
@@ -86,13 +119,23 @@ async def get_project(project_id: str):
             raise HTTPException(404, "Not found")
         orders = await conn.fetch(
             'SELECT * FROM "order" WHERE project_id=$1 ORDER BY created_at DESC', project_id)
-        return {**dict(row), "orders": [dict(o) for o in orders]}
+        # Total cost for project
+        cost_row = await conn.fetchrow("""
+            SELECT COALESCE(SUM(e.cost_usd),0) AS total_cost
+            FROM execution e
+            JOIN task t ON t.id = e.task_id
+            JOIN "order" o ON o.id = t.order_id
+            WHERE o.project_id=$1 AND e.status='completed'
+        """, project_id)
+        return {**dict(row), "orders": [dict(o) for o in orders],
+                "total_cost": float(cost_row['total_cost'])}
 
 @app.post("/api/projects/{project_id}/orders", status_code=201)
 async def create_order(project_id: str, body: OrderCreate, bg: BackgroundTasks):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        if not await conn.fetchrow("SELECT id FROM project WHERE id=$1", project_id):
+        project = await conn.fetchrow("SELECT * FROM project WHERE id=$1", project_id)
+        if not project:
             raise HTTPException(404, "Project not found")
         row = await conn.fetchrow("""
             INSERT INTO "order" (project_id, title, description, status)
@@ -117,6 +160,67 @@ async def get_tasks(order_id: str):
             "SELECT id, order_id, project_id, title, description, agent_type, model, status, result, github_pr_url, sort_order, created_at, updated_at FROM task WHERE order_id=$1 ORDER BY sort_order",
             order_id)
         return [dict(r) for r in rows]
+
+@app.post("/api/tasks/{task_id}/retry")
+async def retry_task(task_id: str, bg: BackgroundTasks):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        task = await conn.fetchrow("SELECT * FROM task WHERE id=$1", task_id)
+        if not task:
+            raise HTTPException(404, "Task not found")
+        if task['status'] not in ('failed',):
+            raise HTTPException(400, f"Task status is '{task['status']}', only 'failed' tasks can be retried")
+        # Check budget before retrying
+        project = await conn.fetchrow("SELECT * FROM project WHERE id=$1", task['project_id'])
+        if project and project['budget_usd']:
+            spent = await conn.fetchval("""
+                SELECT COALESCE(SUM(e.cost_usd),0) FROM execution e
+                JOIN task t ON t.id = e.task_id
+                JOIN "order" o ON o.id = t.order_id
+                WHERE o.project_id=$1 AND e.status='completed'
+            """, str(task['project_id']))
+            if float(spent or 0) >= float(project['budget_usd']):
+                raise HTTPException(402, f"Budget limit ${project['budget_usd']} reached")
+        await conn.execute("UPDATE task SET status='pending', updated_at=NOW() WHERE id=$1", task_id)
+    bg.add_task(_run_task, task_id, str(task['project_id']))
+    return {"status": "retrying", "task_id": task_id}
+
+async def _run_task(task_id: str, project_id: str):
+    from orchestra.agents.developer import execute_task
+    try:
+        await execute_task(task_id, project_id)
+    except Exception as e:
+        logger.error(f"retry task={task_id}: {e}")
+
+# Approve pending order execution (autonomy=planning mode)
+@app.post("/api/orders/{order_id}/approve")
+async def approve_order(order_id: str, bg: BackgroundTasks):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow('SELECT * FROM "order" WHERE id=$1', order_id)
+        if not order:
+            raise HTTPException(404, "Order not found")
+        if order['status'] != 'awaiting_approval':
+            raise HTTPException(400, f"Order status is '{order['status']}', expected 'awaiting_approval'")
+        tasks = await conn.fetch(
+            "SELECT id FROM task WHERE order_id=$1 AND status='pending' ORDER BY sort_order", order_id)
+        await conn.execute(
+            'UPDATE "order" SET status=\'executing\', updated_at=NOW() WHERE id=$1', order_id)
+        task_ids = [str(t['id']) for t in tasks]
+        project_id = str(order['project_id'])
+
+    from orchestra.broadcast import broadcast
+    await broadcast(project_id, {"type": "order_updated", "order_id": order_id, "status": "executing"})
+    bg.add_task(_run_approved_tasks, task_ids, project_id)
+    return {"status": "approved", "tasks": len(task_ids)}
+
+async def _run_approved_tasks(task_ids: list, project_id: str):
+    from orchestra.agents.developer import execute_task
+    for task_id in task_ids:
+        try:
+            await execute_task(task_id, project_id)
+        except Exception as e:
+            logger.error(f"approved task={task_id}: {e}")
 
 @app.get("/api/orders/{order_id}/cost")
 async def get_order_cost(order_id: str):

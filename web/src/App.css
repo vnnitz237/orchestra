@@ -142,6 +142,14 @@ body { background: var(--bg); color: var(--fg); min-height: 100vh; }
 .order-cost { font-size: 0.7rem; color: #059669; font-weight: 600; font-family: ui-monospace, monospace; }
 .order-cost-detail { font-size: 0.75rem; color: var(--fg2); padding: 6px 0 8px; font-family: ui-monospace, monospace; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
 
+.approve-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; background: #f3e8ff; border-radius: 10px; margin: 8px 0; }
+.approve-msg { font-size: 0.8125rem; color: #6b21a8; }
+.btn-approve { background: #7c3aed; color: #fff; border: none; padding: 7px 16px; border-radius: 8px; font-size: 0.8125rem; font-weight: 600; cursor: pointer; font-family: inherit; white-space: nowrap; }
+.btn-approve:hover { background: #6d28d9; }
+
+.btn-retry { background: transparent; color: var(--accent); border: 1px solid var(--accent); padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 600; cursor: pointer; font-family: inherit; }
+.btn-retry:hover { background: var(--accent); color: #fff; }
+
 .right-panel { display: flex; flex-direction: column; gap: 14px; position: sticky; top: 76px; }
 .activity-feed { background: var(--surface); border-radius: var(--radius); padding: 14px; box-shadow: var(--shadow); }
 .activity-log { display: flex; flex-direction: column; gap: 5px; max-height: 260px; overflow-y: auto; }
