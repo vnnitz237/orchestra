@@ -13,7 +13,16 @@ die()  { printf "${RED}[✗]${RESET} %s\n" "$*"; exit 1; }
 
 # ── 0. Prerequisites ──────────────────────────────────────────
 log "Checking prerequisites…"
-command -v brew >/dev/null 2>&1 || die "Homebrew not found. Install at https://brew.sh"
+# Homebrew may not be in PATH when running via `bash script.sh`
+if ! command -v brew >/dev/null 2>&1; then
+  if [ -x /opt/homebrew/bin/brew ]; then        # Apple Silicon
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -x /usr/local/bin/brew ]; then          # Intel
+    eval "$(/usr/local/bin/brew shellenv)"
+  else
+    die "Homebrew not found. Install at https://brew.sh"
+  fi
+fi
 
 if ! command -v python3.11 >/dev/null 2>&1 && ! command -v python3.12 >/dev/null 2>&1; then
   log "Installing Python 3.11…"
