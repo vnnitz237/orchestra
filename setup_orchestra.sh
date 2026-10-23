@@ -12,7 +12,7 @@ warn() { printf "${YELLOW}[!]${RESET} %s\n" "$*"; }
 die()  { printf "${RED}[✗]${RESET} %s\n" "$*"; exit 1; }
 
 # ── 0. Prerequisites ──────────────────────────────────────────
-log "Checking prerequisites…"
+log "Checking prerequisites..."
 # Homebrew may not be in PATH when running via `bash script.sh`
 if ! command -v brew >/dev/null 2>&1; then
   if [ -x /opt/homebrew/bin/brew ]; then        # Apple Silicon
@@ -25,7 +25,7 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 
 if ! command -v python3.11 >/dev/null 2>&1 && ! command -v python3.12 >/dev/null 2>&1; then
-  log "Installing Python 3.11…"
+  log "Installing Python 3.11..."
   brew install python@3.11
 fi
 
@@ -37,7 +37,7 @@ ok "Docker is running"
 
 # ── 1. Directory setup ────────────────────────────────────────
 ROOT_DIR="$HOME/orchestra"
-log "Setting up $ROOT_DIR…"
+log "Setting up $ROOT_DIR..."
 
 if [ -f "$ROOT_DIR/.env" ]; then
   cp "$ROOT_DIR/.env" /tmp/_orchestra_env_bak
@@ -649,7 +649,7 @@ function StatusBadge({ status }) {
 }
 
 function ArtifactModal({ artifact, onClose }) {
-  const [content, setContent] = useState('Loading…')
+  const [content, setContent] = useState('Loading...')
   useEffect(() => {
     fetch(`/api/artifacts/${artifact.id}/content`)
       .then(r => r.text())
@@ -705,7 +705,7 @@ function OrderCard({ order, tasks, expanded, onExpand }) {
         <div className="order-body">
           <p className="order-desc">{order.description}</p>
           {taskList.length === 0 && order.status === 'pending' && (
-            <p className="order-waiting">Waiting for coordinator…</p>
+            <p className="order-waiting">Waiting for coordinator...</p>
           )}
           {taskList.map(t => <TaskRow key={t.id} task={t} />)}
         </div>
@@ -881,7 +881,7 @@ export default function App() {
             <div className="form-body">
               <input className="input" placeholder="What do you want to build?" value={newOrderTitle}
                 onChange={e => setNewOrderTitle(e.target.value)} autoFocus />
-              <textarea className="input" placeholder="Describe in detail what the agents should implement…" rows={5}
+              <textarea className="input" placeholder="Describe in detail what the agents should implement..." rows={5}
                 value={newOrderDesc} onChange={e => setNewOrderDesc(e.target.value)} />
               <button className="btn-primary" onClick={createOrder}>Send to Coordinator →</button>
             </div>
@@ -1130,18 +1130,18 @@ volumes:
 EOF
 
 # ── 11. Build and run ─────────────────────────────────────────
-log "Creating Python virtualenv…"
+log "Creating Python virtualenv..."
 $PYTHON -m venv .venv
 source .venv/bin/activate
 pip install --quiet --upgrade pip
 pip install --quiet -e .
 ok "Python environment ready"
 
-log "Starting Docker stack (first build may take a few minutes)…"
+log "Starting Docker stack (first build may take a few minutes)..."
 docker compose down -v --remove-orphans 2>/dev/null || true
 docker compose up -d --build
 
-log "Waiting for Postgres…"
+log "Waiting for Postgres..."
 for i in $(seq 1 30); do
   if docker compose exec -T postgres pg_isready -U postgres >/dev/null 2>&1; then
     break
@@ -1149,7 +1149,7 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-log "Applying schema…"
+log "Applying schema..."
 docker compose exec -T api python -c "
 import asyncio, asyncpg, pathlib, os
 async def run():
