@@ -458,6 +458,10 @@ For each file, use this exact format:
 
 Generate complete, working, production-quality code with error handling."""
 
+        response_text = ""
+        tokens_in = 0
+        tokens_out = 0
+        cost = 0.0
         try:
             msg = client.messages.create(
                 model="claude-opus-4-5", max_tokens=4096,
@@ -466,7 +470,6 @@ Generate complete, working, production-quality code with error handling."""
             tokens_in = msg.usage.input_tokens
             tokens_out = msg.usage.output_tokens
             cost = (tokens_in * 0.015 + tokens_out * 0.075) / 1000
-            await broadcast(project_id, {"type": "activity", "task_id": task_id, "msg": f"Generated {len(files)} file(s) — ${cost:.4f} ({tokens_in+tokens_out} tokens)"})
         except Exception as e:
             logger.error(f"Developer failed task={task_id}: {e}")
             await conn.execute("UPDATE task SET status='failed', updated_at=NOW() WHERE id=$1", task_id)
@@ -475,6 +478,9 @@ Generate complete, working, production-quality code with error handling."""
             return
 
         files = _parse_files(response_text)
+        await broadcast(project_id, {"type": "activity", "task_id": task_id,
+            "msg": f"Generated {len(files)} file(s) — ${cost:.4f} ({tokens_in+tokens_out} tokens)"})
+
         artifact_ids = []
         for f in files:
             art_id = str(uuid.uuid4())
@@ -505,8 +511,6 @@ Generate complete, working, production-quality code with error handling."""
             except Exception as pr_err:
                 logger.warning(f"PR creation failed for task={task_id}: {pr_err}")
 
-        cost_usd = cost if 'cost' in dir() else 0
-        tokens_total = (tokens_in + tokens_out) if 'tokens_in' in dir() else 0
         result = json.dumps({"artifacts": artifact_ids, "files": len(files), "pr_url": pr_url})
         await conn.execute(
             "UPDATE task SET status='completed', result=$1, github_pr_url=$2, updated_at=NOW() WHERE id=$3",
@@ -515,8 +519,8 @@ Generate complete, working, production-quality code with error handling."""
             "type": "task_updated", "task_id": task_id,
             "status": "completed", "artifacts": artifact_ids,
             "github_pr_url": pr_url,
-            "cost_usd": float(cost_usd),
-            "tokens": tokens_total
+            "cost_usd": float(cost),
+            "tokens": tokens_in + tokens_out
         })
 
     pool = await get_pool()
