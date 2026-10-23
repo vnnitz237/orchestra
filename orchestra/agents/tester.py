@@ -55,7 +55,7 @@ async def execute_task(task_id: str, project_id: str) -> None:
         """, exec_id, task_id, 'tester',
             json.dumps({"title": task['title'], "description": task['description']}))
 
-        client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=180.0)
         project_name = project['name'] if project else "Software project"
         order_title = order['title'] if order else ""
 
@@ -128,10 +128,14 @@ async def execute_task(task_id: str, project_id: str) -> None:
             files = _parse_files(response_text)
 
         except Exception as e:
-            logger.error(f"Tester failed task={task_id}: {e}")
+            err_msg = str(e)[:500]
+            logger.error(f"Tester failed task={task_id}: {err_msg}")
             await conn.execute("UPDATE task SET status='failed', updated_at=NOW() WHERE id=$1", task_id)
-            await conn.execute("UPDATE execution SET status='failed', finished_at=NOW() WHERE id=$1", exec_id)
-            await broadcast(project_id, {"type": "task_updated", "task_id": task_id, "status": "failed"})
+            await conn.execute(
+                "UPDATE execution SET status='failed', output=$1, finished_at=NOW() WHERE id=$2",
+                err_msg, exec_id)
+            await broadcast(project_id, {"type": "task_updated", "task_id": task_id, "status": "failed",
+                "error": err_msg})
             return
 
         await broadcast(project_id, {"type": "activity", "task_id": task_id,

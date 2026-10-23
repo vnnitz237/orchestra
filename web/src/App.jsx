@@ -1,5 +1,24 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 
+// ─── Toast Notifications ──────────────────────────────────────────────────────
+let _toastId = 0
+function ToastStack({ toasts, onRemove }) {
+  return (
+    <div className="rq-toast-stack" aria-live="polite">
+      {toasts.map(t => (
+        <div key={t.id} className={`rq-toast rq-toast--${t.kind}`}>
+          <span className="rq-toast-icon">{t.kind==='success' ? '✓' : t.kind==='error' ? '✕' : 'ℹ'}</span>
+          <div className="rq-toast-body">
+            <div className="rq-toast-title">{t.title}</div>
+            {t.sub && <div className="rq-toast-sub">{t.sub}</div>}
+          </div>
+          <button className="rq-toast-close" onClick={() => onRemove(t.id)}>✕</button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ─── Agent Definitions ────────────────────────────────────────────────────────
 const AGENTS = {
   coordinator: { name: 'Atlas', role: 'Coordenador', color: '#2563EB' },
@@ -108,6 +127,9 @@ function PlanStep({ task, onRetry }) {
             <button className="rq-retry-btn" onClick={() => onRetry(task.id)}>↺ Tentar novamente</button>
           )}
         </div>
+        {task.status === 'failed' && task.last_error && (
+          <div className="rq-step-error">{task.last_error}</div>
+        )}
       </div>
       <StatusPill status={task.status}/>
     </div>
@@ -410,6 +432,13 @@ export default function App() {
   const [composerText, setComposerText] = useState('')
   const [isConnected, setIsConnected] = useState(false)
   const [showExecDrawer, setShowExecDrawer] = useState(false)
+  const [toasts, setToasts] = useState([])
+
+  const addToast = useCallback((title, sub, kind = 'info') => {
+    const id = ++_toastId
+    setToasts(prev => [...prev, { id, title, sub, kind }])
+    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000)
+  }, [])
 
   const wsRef = useRef(null)
   const wsProjectRef = useRef(null)
@@ -472,7 +501,17 @@ export default function App() {
   const handleWsMessage = useCallback((e) => {
     const ev = JSON.parse(e.data)
     if (ev.type === 'order_updated') {
-      setOrders(prev => prev.map(o => o.id === ev.order_id ? { ...o, status: ev.status } : o))
+      setOrders(prev => {
+        const order = prev.find(o => o.id === ev.order_id)
+        if (ev.status === 'completed') {
+          addToast('Pedido concluído', order?.title?.slice(0, 60), 'success')
+        } else if (ev.status === 'failed') {
+          addToast('Pedido falhou', order?.title?.slice(0, 60), 'error')
+        } else if (ev.status === 'awaiting_approval') {
+          addToast('Aguardando aprovação', order?.title?.slice(0, 60), 'info')
+        }
+        return prev.map(o => o.id === ev.order_id ? { ...o, status: ev.status } : o)
+      })
       if (ev.status === 'completed' || ev.status === 'awaiting_approval') {
         const pid = wsProjectRef.current
         if (pid) fetch(`/api/projects/${pid}/artifacts`).then(r => r.json()).then(setArtifacts)
@@ -491,7 +530,8 @@ export default function App() {
         for (const [k, v] of Object.entries(prev)) {
           next[k] = v.map(t => t.id === ev.task_id
             ? { ...t, status: ev.status, github_pr_url: ev.github_pr_url || t.github_pr_url,
-                cost_usd: ev.cost_usd ?? t.cost_usd, tokens: ev.tokens ?? t.tokens }
+                cost_usd: ev.cost_usd ?? t.cost_usd, tokens: ev.tokens ?? t.tokens,
+                last_error: ev.error ?? t.last_error }
             : t)
         }
         return next
@@ -500,7 +540,7 @@ export default function App() {
       const now = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })
       setActivityLogs(prev => [...prev.slice(-99), { msg: ev.msg, time: now, task_id: ev.task_id }])
     }
-  }, [])
+  }, [addToast])
 
   const connectWs = useCallback((projectId) => {
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
@@ -690,6 +730,7 @@ export default function App() {
   // ── Home page ──────────────────────────────────────────────────────────────
   if (page === 'home') return (
     <div className="rq-shell">
+      <ToastStack toasts={toasts} onRemove={id => setToasts(prev => prev.filter(t => t.id !== id))}/>
       <header className="rq-header">
         <div className="rq-header-inner">
           <span className="rq-header-logo">Orchestra</span>
@@ -746,6 +787,9 @@ export default function App() {
                     {p.github_repo && <div className="rq-project-card-repo">{p.github_repo}</div>}
                     {p.description && <div className="rq-project-card-desc">{p.description}</div>}
                     <div className="rq-project-card-meta">{p.order_count || 0} pedido{(p.order_count||0)!==1?'s':''}</div>
+                    {Number(p.total_cost) > 0 && (
+                      <span className="rq-project-card-cost">US$ {Number(p.total_cost).toFixed(4)}</span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -790,6 +834,7 @@ export default function App() {
   return (
     <div className="rq-shell">
       {modals}
+      <ToastStack toasts={toasts} onRemove={id => setToasts(prev => prev.filter(t => t.id !== id))}/>
 
       {/* ── Header ──────────────────────────────────────────────────── */}
       <header className="rq-header">

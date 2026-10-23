@@ -451,6 +451,54 @@ button, a, input, textarea { -webkit-tap-highlight-color: transparent; }
 .rq-empty h2 { font: 600 20px/28px var(--rq-font); color: var(--rq-text); margin-bottom: 8px; }
 .rq-empty p  { font: 400 14px/22px var(--rq-font); margin-bottom: 24px; }
 
+/* ── Toast Notifications ─────────────────────────────────────────── */
+.rq-toast-stack {
+  position: fixed; bottom: 24px; right: 24px; z-index: 200;
+  display: flex; flex-direction: column; gap: 10px;
+  pointer-events: none;
+}
+.rq-toast {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 14px 18px; border-radius: var(--rq-radius-control);
+  background: var(--rq-text); color: var(--rq-canvas);
+  font: 500 13.5px/20px var(--rq-font);
+  box-shadow: 0 4px 20px rgb(0 0 0 / .18);
+  pointer-events: auto; max-width: 340px;
+  animation: toastIn var(--rq-normal) ease forwards;
+}
+.rq-toast--success { background: #064e3b; }
+.rq-toast--error   { background: #7f1d1d; }
+.rq-toast--info    { background: #1e3a5f; }
+.rq-toast-icon { flex-shrink: 0; font-size: 16px; line-height: 20px; }
+.rq-toast-body { flex: 1; min-width: 0; }
+.rq-toast-title { font-weight: 600; }
+.rq-toast-sub   { font: 400 12px/18px var(--rq-font); opacity: .8; margin-top: 2px; }
+.rq-toast-close {
+  flex-shrink: 0; background: none; border: none; cursor: pointer;
+  color: inherit; opacity: .6; font-size: 14px; line-height: 20px;
+  padding: 0; margin-left: 4px;
+}
+.rq-toast-close:hover { opacity: 1; }
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(12px) scale(.96); }
+  to   { opacity: 1; transform: translateY(0)  scale(1); }
+}
+
+/* ── Task error message ──────────────────────────────────────────── */
+.rq-step-error {
+  font: 400 11.5px/17px var(--rq-mono); color: var(--rq-danger);
+  background: #fef2f2; border: 1px solid #fecaca;
+  border-radius: 6px; padding: 6px 10px; margin-top: 6px;
+  white-space: pre-wrap; word-break: break-word;
+}
+
+/* ── Project card cost badge ─────────────────────────────────────── */
+.rq-project-card-cost {
+  font: 500 12px/18px var(--rq-mono); color: var(--rq-success);
+  background: #ecfdf5; border-radius: 6px; padding: 2px 7px;
+  display: inline-block; margin-top: 6px;
+}
+
 /* Exec drawer (tablet) */
 .rq-drawer-btn { display: none; }
 .rq-exec-drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.2); z-index: 49; }

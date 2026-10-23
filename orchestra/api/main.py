@@ -79,9 +79,12 @@ async def list_projects():
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch("""
-            SELECT p.*, COUNT(o.id) AS order_count
+            SELECT p.*, COUNT(DISTINCT o.id) AS order_count,
+                   COALESCE(SUM(e.cost_usd), 0) AS total_cost
             FROM project p
             LEFT JOIN "order" o ON o.project_id = p.id
+            LEFT JOIN task t ON t.project_id = p.id
+            LEFT JOIN execution e ON e.task_id = t.id AND e.status = 'completed'
             GROUP BY p.id ORDER BY p.created_at DESC
         """)
         return [dict(r) for r in rows]
@@ -164,7 +167,10 @@ async def get_tasks(order_id: str):
                    t.model, t.status, t.result, t.github_pr_url, t.sort_order,
                    t.created_at, t.updated_at,
                    COALESCE(SUM(e.cost_usd), 0)     AS cost_usd,
-                   COALESCE(SUM(e.tokens_used), 0)  AS tokens_used
+                   COALESCE(SUM(e.tokens_used), 0)  AS tokens_used,
+                   (SELECT output FROM execution
+                    WHERE task_id = t.id AND status = 'failed'
+                    ORDER BY created_at DESC LIMIT 1) AS last_error
             FROM task t
             LEFT JOIN execution e ON e.task_id = t.id AND e.status = 'completed'
             WHERE t.order_id = $1
