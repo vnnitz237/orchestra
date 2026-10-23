@@ -958,9 +958,20 @@ export default function App() {
 
   useEffect(() => { loadProjects() }, [loadProjects])
 
+  useEffect(() => {
+    const saved = localStorage.getItem('orchestra_project')
+    if (saved) {
+      try {
+        const p = JSON.parse(saved)
+        openProject(p)
+      } catch {}
+    }
+  }, [])
+
   const openProject = async (p) => {
     setProject(p); setPage('project')
     setOrders([]); setTasks({}); setCosts({}); setArtifacts({}); setExpandedOrders({}); setActivityLogs([])
+    try { localStorage.setItem('orchestra_project', JSON.stringify(p)) } catch {}
     const res = await fetch(`/api/projects/${p.id}`)
     const data = await res.json()
     setOrders(data.orders || [])
@@ -1099,6 +1110,7 @@ export default function App() {
         <button className="btn-ghost" onClick={() => {
           setPage('home'); loadProjects();
           if (wsRef.current) wsRef.current.close()
+          try { localStorage.removeItem('orchestra_project') } catch {}
         }}>← Projects</button>
         <div className="logo">{project?.name}</div>
         <button className="btn-primary" onClick={() => setShowNewOrder(true)}>+ New Order</button>
@@ -1426,7 +1438,7 @@ pip install --quiet -e .
 ok "Python environment ready"
 
 log "Starting Docker stack (first build may take a few minutes)..."
-docker compose down -v --remove-orphans 2>/dev/null || true
+docker compose down --remove-orphans 2>/dev/null || true
 docker compose up -d --build
 
 log "Waiting for Postgres..."
