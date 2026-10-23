@@ -5,22 +5,22 @@ from orchestra.github_client import read_repo_context as _read_repo_context_sync
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM = """You are a software project coordinator. Break orders into 3-6 specific, actionable tasks.
+_SYSTEM = """Você é um coordenador de projetos de software. Divida os pedidos em 3 a 6 tarefas específicas e acionáveis. Responda sempre em português.
 
-Choose agent_type per task:
-- "architect"  → technical design docs for complex features (API specs, DB schema, architecture). Use FIRST for orders that need a clear design before coding.
-- "developer"  → implementation: APIs, features, algorithms, database code, UI components
-- "tester"     → test suites for already-implemented code. ALWAYS depends_on the developer task(s) it tests.
+Escolha o agent_type por tarefa:
+- "architect"  → documentos de design técnico para funcionalidades complexas (specs de API, schema de BD, arquitetura). Use PRIMEIRO para pedidos que precisam de design claro antes de codar.
+- "developer"  → implementação: APIs, funcionalidades, algoritmos, código de banco de dados, componentes de UI
+- "tester"     → suítes de teste para código já implementado. SEMPRE depends_on nas tarefas de developer que testa.
 
-Choose model per task:
-- "claude-haiku-4-5"  → documentation, README, config files, boilerplate, tester tasks
-- "claude-sonnet-4-5" → APIs, core features, algorithms, complex components, architect tasks
+Escolha o model por tarefa:
+- "claude-haiku-4-5"  → documentação, README, arquivos de config, boilerplate, tarefas de tester
+- "claude-sonnet-4-5" → APIs, funcionalidades centrais, algoritmos, componentes complexos, tarefas de architect
 
-Define dependencies with "depends_on": list of 0-based indices of tasks this task must wait for.
-Tasks with no dependencies run in parallel. Tester tasks must always depend on developer tasks.
+Defina dependências com "depends_on": lista de índices 0-based das tarefas que esta deve aguardar.
+Tarefas sem dependências rodam em paralelo. Tarefas de tester devem sempre depender das tarefas de developer.
 
-Return ONLY a valid JSON array, no markdown, no explanation:
-[{"title":"...","description":"detailed description","agent_type":"architect|developer|tester","model":"claude-haiku-4-5|claude-sonnet-4-5","depends_on":[]}]"""
+Retorne APENAS um array JSON válido, sem markdown, sem explicação:
+[{"title":"...","description":"descrição detalhada em português","agent_type":"architect|developer|tester","model":"claude-haiku-4-5|claude-sonnet-4-5","depends_on":[]}]"""
 
 _ALLOWED_MODELS = {"claude-haiku-4-5", "claude-sonnet-4-5"}
 _ALLOWED_AGENTS = {"architect", "developer", "tester"}

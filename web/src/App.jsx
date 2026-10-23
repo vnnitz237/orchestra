@@ -2,10 +2,10 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 
 // ─── Agent Definitions ────────────────────────────────────────────────────────
 const AGENTS = {
-  coordinator: { name: 'Atlas', role: 'Coordinator', color: '#2563EB' },
-  architect:   { name: 'Lia',   role: 'Architect',   color: '#7C3AED' },
-  developer:   { name: 'Tec',   role: 'Developer',   color: '#00B978' },
-  tester:      { name: 'Finn',  role: 'Tester',      color: '#F59E0B' },
+  coordinator: { name: 'Atlas', role: 'Coordenador', color: '#2563EB' },
+  architect:   { name: 'Lia',   role: 'Arquiteta',   color: '#7C3AED' },
+  developer:   { name: 'Tec',   role: 'Desenvolvedor', color: '#00B978' },
+  tester:      { name: 'Finn',  role: 'Testador',    color: '#F59E0B' },
 }
 
 const AV_COLORS = ['#2563EB','#00B978','#F59E0B','#7C3AED','#e11d48','#0891b2','#ea580c','#16a34a']
@@ -50,13 +50,13 @@ function InitialsAvatar({ name, size = 44 }) {
 
 // ─── Status Pill ──────────────────────────────────────────────────────────────
 const PILL_MAP = {
-  pending:           'Pending',
-  analyzing:         'Analyzing',
-  executing:         'Executing',
-  completed:         'Done',
-  failed:            'Failed',
-  blocked:           'Blocked',
-  awaiting_approval: 'Awaiting Approval',
+  pending:           'Pendente',
+  analyzing:         'Analisando',
+  executing:         'Executando',
+  completed:         'Concluído',
+  failed:            'Falhou',
+  blocked:           'Bloqueado',
+  awaiting_approval: 'Aguardando Aprovação',
 }
 function StatusPill({ status }) {
   const cls = `rq-pill rq-pill--${status}`
@@ -65,17 +65,17 @@ function StatusPill({ status }) {
 
 // ─── Artifact Modal ───────────────────────────────────────────────────────────
 function ArtifactModal({ artifact, onClose }) {
-  const [content, setContent] = useState('Loading…')
+  const [content, setContent] = useState('Carregando…')
   useEffect(() => {
     fetch(`/api/artifacts/${artifact.id}/content`)
-      .then(r => r.text()).then(setContent).catch(() => setContent('Failed to load'))
+      .then(r => r.text()).then(setContent).catch(() => setContent('Falha ao carregar'))
   }, [artifact.id])
   return (
     <div className="rq-overlay" onClick={onClose}>
       <div className="rq-modal rq-modal-wide" onClick={e => e.stopPropagation()}>
         <div className="rq-modal-header">
           <span className="rq-modal-title">{artifact.path}</span>
-          <button className="rq-icon-btn" onClick={onClose} aria-label="Close">✕</button>
+          <button className="rq-icon-btn" onClick={onClose} aria-label="Fechar">✕</button>
         </div>
         <pre className="rq-code-block">{content}</pre>
       </div>
@@ -105,7 +105,7 @@ function PlanStep({ task, onRetry }) {
             <a className="rq-pr-link" href={task.github_pr_url} target="_blank" rel="noreferrer">↗ PR</a>
           )}
           {task.status === 'failed' && onRetry && (
-            <button className="rq-retry-btn" onClick={() => onRetry(task.id)}>↺ Retry</button>
+            <button className="rq-retry-btn" onClick={() => onRetry(task.id)}>↺ Tentar novamente</button>
           )}
         </div>
       </div>
@@ -119,8 +119,8 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
   if (!order) {
     return (
       <div className="rq-exec-empty">
-        <div className="rq-exec-empty-title">Execution view</div>
-        <div className="rq-exec-empty-desc">Select a conversation to see task details, plan steps and generated files.</div>
+        <div className="rq-exec-empty-title">Painel de execução</div>
+        <div className="rq-exec-empty-desc">Selecione uma conversa para ver detalhes das tarefas, etapas do plano e arquivos gerados.</div>
       </div>
     )
   }
@@ -133,13 +133,13 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
     <>
       <div className="rq-exec-header">
         <div>
-          <div className="rq-exec-title">Execution view</div>
+          <div className="rq-exec-title">Painel de execução</div>
           <div className="rq-exec-order-title">{order.title}</div>
         </div>
         <div className="rq-live-indicator">
           <div className={`rq-live-dot${isActive && isConnected ? ' pulse' : isActive ? '' : ' off'}`}/>
           <span className="rq-live-label">
-            {isActive && isConnected ? 'Live' : isActive ? 'Reconnecting' : 'Done'}
+            {isActive && isConnected ? 'Ao vivo' : isActive ? 'Reconectando' : 'Concluído'}
           </span>
         </div>
       </div>
@@ -150,7 +150,7 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
           <StatusPill status={order.status}/>
           {tasks.length > 0 && (
             <span style={{ font:'400 12px/18px var(--rq-font)', color:'var(--rq-muted)' }}>
-              {done}/{tasks.length} tasks
+              {done}/{tasks.length} tarefas
             </span>
           )}
         </div>
@@ -159,14 +159,14 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
       {/* Approval */}
       {order.status === 'awaiting_approval' && (
         <div className="rq-exec-section">
-          <div className="rq-section-label">Your decision</div>
+          <div className="rq-section-label">Sua decisão</div>
           <div className="rq-approval">
-            <div className="rq-approval-title">Approve execution plan</div>
+            <div className="rq-approval-title">Aprovar plano de execução</div>
             <div className="rq-approval-desc">
-              {tasks.length} task{tasks.length !== 1 ? 's' : ''} planned. Review them below and approve to start execution.
+              {tasks.length} tarefa{tasks.length !== 1 ? 's' : ''} planejada{tasks.length !== 1 ? 's' : ''}. Revise abaixo e aprove para iniciar a execução.
             </div>
             <button className="rq-approve-btn" onClick={() => onApprove(order.id)}>
-              ✓ Approve & Execute
+              ✓ Aprovar e Executar
             </button>
           </div>
         </div>
@@ -175,7 +175,7 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
       {/* Plan steps */}
       {tasks.length > 0 && (
         <div className="rq-exec-section">
-          <div className="rq-section-label">Plan · {tasks.length} step{tasks.length !== 1 ? 's' : ''}</div>
+          <div className="rq-section-label">Plano · {tasks.length} etapa{tasks.length !== 1 ? 's' : ''}</div>
           <div className="rq-plan-steps">
             {tasks.map(t => <PlanStep key={t.id} task={t} onRetry={onRetry}/>)}
           </div>
@@ -185,7 +185,7 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
       {/* Artifacts */}
       {orderArtifacts.length > 0 && (
         <div className="rq-exec-section">
-          <div className="rq-section-label">Generated files · {orderArtifacts.length}</div>
+          <div className="rq-section-label">Arquivos gerados · {orderArtifacts.length}</div>
           <div className="rq-artifact-list">
             {orderArtifacts.slice(0,12).map(a => {
               const icon = a.kind === 'test' ? '🧪' : a.kind === 'spec' ? '📐' : '📄'
@@ -200,7 +200,7 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
           </div>
           <div className="rq-artifact-actions">
             <a className="rq-zip-btn" href={`/api/orders/${order.id}/artifacts/download`} download>
-              ⬇ Download ZIP
+              ⬇ Baixar ZIP
             </a>
           </div>
         </div>
@@ -240,7 +240,7 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
           )
         })() : (
           <span style={{ font:'400 13px/20px var(--rq-font)', color:'var(--rq-muted)' }}>
-            Nenhum gasto ainda
+            Sem gastos ainda
           </span>
         )}
       </div>
@@ -257,19 +257,19 @@ function ChatMessage({ order, tasks, cost, isSelected, onClick, onApprove }) {
 
   let agentText = ''
   switch (order.status) {
-    case 'pending':   agentText = 'Analyzing your request…'; break
-    case 'analyzing': agentText = 'Planning tasks…'; break
+    case 'pending':   agentText = 'Analisando sua solicitação…'; break
+    case 'analyzing': agentText = 'Planejando tarefas…'; break
     case 'awaiting_approval':
-      agentText = `I've planned ${total} task${total!==1?'s':''}. Review and approve to start.`; break
+      agentText = `Planejei ${total} tarefa${total!==1?'s':''}. Revise e aprove para iniciar.`; break
     case 'executing':
-      agentText = total ? `${done}/${total} tasks completed` : 'Working on it…'; break
+      agentText = total ? `${done}/${total} tarefas concluídas` : 'Trabalhando…'; break
     case 'completed':
-      agentText = `Order complete · ${total} task${total!==1?'s':''}`
+      agentText = `Pedido concluído · ${total} tarefa${total!==1?'s':''}`
       if (cost && Number(cost.total_cost)>0) agentText += ` · $${Number(cost.total_cost).toFixed(4)}`
       break
     case 'failed':
-      agentText = 'Some tasks failed. Check the execution panel for details.'; break
-    default: agentText = 'Processing…'
+      agentText = 'Algumas tarefas falharam. Veja o painel de execução para detalhes.'; break
+    default: agentText = 'Processando…'
   }
 
   return (
@@ -300,7 +300,7 @@ function ChatMessage({ order, tasks, cost, isSelected, onClick, onApprove }) {
           <AgentAvatar type="coordinator" size={32}/>
         </div>
         <div className="rq-msg-body">
-          <div className="rq-msg-sender">Atlas · Coordinator</div>
+          <div className="rq-msg-sender">Atlas · Coordenador</div>
           <div
             className={`rq-bubble rq-bubble--in${isSelected?' rq-bubble--sel':''}`}
             onClick={onClick}
@@ -308,7 +308,7 @@ function ChatMessage({ order, tasks, cost, isSelected, onClick, onApprove }) {
             <div className="rq-bubble-status">{agentText}</div>
             {order.status === 'awaiting_approval' && (
               <button className="rq-bubble-action" onClick={e => { e.stopPropagation(); onApprove(order.id) }}>
-                ✓ Approve & Execute
+                ✓ Aprovar e Executar
               </button>
             )}
           </div>
@@ -345,17 +345,17 @@ function Composer({ value, onChange, onSend, disabled }) {
         <textarea
           ref={ref}
           className="rq-composer-ta"
-          placeholder="Describe what you want to build… (Enter to send, Shift+Enter for new line)"
+          placeholder="Descreva o que quer construir… (Enter para enviar, Shift+Enter para nova linha)"
           value={value}
           onChange={e => onChange(e.target.value)}
           onKeyDown={handleKey}
           rows={1}
         />
-        <button className="rq-send-btn" onClick={onSend} disabled={disabled || !value.trim()} aria-label="Send">
-          ↑ Send
+        <button className="rq-send-btn" onClick={onSend} disabled={disabled || !value.trim()} aria-label="Enviar">
+          ↑ Enviar
         </button>
       </div>
-      <div className="rq-composer-hint">Enter to send · Shift+Enter for new line</div>
+      <div className="rq-composer-hint">Enter para enviar · Shift+Enter para nova linha</div>
     </div>
   )
 }
@@ -364,14 +364,14 @@ function Composer({ value, onChange, onSend, disabled }) {
 function AgentStrip({ allTasks }) {
   const getActivity = (agentType) => {
     const mine = allTasks.filter(t => t.agent_type === agentType || (agentType==='coordinator' && t.agent_type==null))
-    if (mine.some(t => t.status==='executing')) return 'Executing'
-    if (mine.some(t => t.status==='pending'))   return 'In queue'
-    if (mine.length && mine.every(t => t.status==='completed')) return 'Done'
-    return 'Available'
+    if (mine.some(t => t.status==='executing')) return 'Executando'
+    if (mine.some(t => t.status==='pending'))   return 'Na fila'
+    if (mine.length && mine.every(t => t.status==='completed')) return 'Concluído'
+    return 'Disponível'
   }
   return (
     <div className="rq-agent-strip-wrapper">
-      <div className="rq-agent-strip-label">Project team</div>
+      <div className="rq-agent-strip-label">Time do projeto</div>
       <div className="rq-agent-strip">
         {Object.entries(AGENTS).map(([type, ag]) => (
           <div key={type} className="rq-agent-item" title={ag.role}>
@@ -662,24 +662,24 @@ export default function App() {
         <div className="rq-overlay" onClick={() => setShowSettings(false)}>
           <div className="rq-modal" onClick={e => e.stopPropagation()}>
             <div className="rq-modal-header">
-              <span className="rq-modal-title">Project Settings</span>
+              <span className="rq-modal-title">Configurações do Projeto</span>
               <button className="rq-icon-btn" onClick={() => setShowSettings(false)}>✕</button>
             </div>
             <div className="rq-modal-body">
-              <label className="rq-label">Autonomy Mode</label>
+              <label className="rq-label">Modo de Autonomia</label>
               <select className="rq-input" value={settingsAutonomy} onChange={e => setSettingsAutonomy(e.target.value)}>
-                <option value="delegated">Delegated — agents run automatically</option>
-                <option value="supervised">Supervised — monitor, no approval needed</option>
-                <option value="planning">Planning — approve plan before execution</option>
+                <option value="delegated">Delegado — agentes executam automaticamente</option>
+                <option value="supervised">Supervisionado — monitorar, sem aprovação necessária</option>
+                <option value="planning">Planejamento — aprovar o plano antes da execução</option>
               </select>
-              <label className="rq-label">Budget Limit (USD)</label>
+              <label className="rq-label">Limite de Orçamento (USD)</label>
               <input className="rq-input" type="number" min="0" step="0.01"
-                placeholder="Leave empty for unlimited"
+                placeholder="Deixe vazio para sem limite"
                 value={settingsBudget} onChange={e => setSettingsBudget(e.target.value)}/>
               {project.total_cost > 0 && (
-                <span className="rq-hint">Spent so far: ${Number(project.total_cost).toFixed(4)}</span>
+                <span className="rq-hint">Gasto até agora: ${Number(project.total_cost).toFixed(4)}</span>
               )}
-              <button className="rq-btn rq-btn--primary" onClick={saveSettings}>Save Settings</button>
+              <button className="rq-btn rq-btn--primary" onClick={saveSettings}>Salvar Configurações</button>
             </div>
           </div>
         </div>
@@ -695,7 +695,7 @@ export default function App() {
           <span className="rq-header-logo">Orchestra</span>
           <div className="rq-header-actions">
             <button className="rq-btn rq-btn--primary rq-btn--sm" onClick={() => setShowNewProject(true)}>
-              + New Project
+              + Novo Projeto
             </button>
           </div>
         </div>
@@ -705,18 +705,18 @@ export default function App() {
         <div className="rq-overlay" onClick={() => setShowNewProject(false)}>
           <div className="rq-modal" onClick={e => e.stopPropagation()}>
             <div className="rq-modal-header">
-              <span className="rq-modal-title">New Project</span>
+              <span className="rq-modal-title">Novo Projeto</span>
               <button className="rq-icon-btn" onClick={() => setShowNewProject(false)}>✕</button>
             </div>
             <div className="rq-modal-body">
-              <input className="rq-input" placeholder="Project name" value={newProjectName}
+              <input className="rq-input" placeholder="Nome do projeto" value={newProjectName}
                 onChange={e => setNewProjectName(e.target.value)} autoFocus/>
-              <textarea className="rq-input" placeholder="Description (optional)" rows={2}
+              <textarea className="rq-input" placeholder="Descrição (opcional)" rows={2}
                 value={newProjectDesc} onChange={e => setNewProjectDesc(e.target.value)}/>
-              <input className="rq-input" placeholder="GitHub repo (optional) — owner/repo"
+              <input className="rq-input" placeholder="Repositório GitHub (opcional) — owner/repo"
                 value={newProjectRepo} onChange={e => setNewProjectRepo(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && createProject()}/>
-              <button className="rq-btn rq-btn--primary" onClick={createProject}>Create Project</button>
+              <button className="rq-btn rq-btn--primary" onClick={createProject}>Criar Projeto</button>
             </div>
           </div>
         </div>
@@ -727,16 +727,16 @@ export default function App() {
           <div className="rq-home-content">
             <div className="rq-empty">
               <div className="rq-empty-icon">◎</div>
-              <h2>No projects yet</h2>
-              <p>Create a project and give autonomous AI agents their orders.</p>
+              <h2>Nenhum projeto ainda</h2>
+              <p>Crie um projeto e dê ordens aos agentes autônomos de IA.</p>
               <button className="rq-btn rq-btn--primary" onClick={() => setShowNewProject(true)}>
-                Create your first project
+                Criar seu primeiro projeto
               </button>
             </div>
           </div>
         ) : (
           <div className="rq-home-content">
-            <div className="rq-home-section-title">Projects</div>
+            <div className="rq-home-section-title">Projetos</div>
             <div className="rq-project-grid">
               {projects.map(p => (
                 <div key={p.id} className="rq-project-card" onClick={() => openProject(p)}>
@@ -745,7 +745,7 @@ export default function App() {
                     <div className="rq-project-card-name">{p.name}</div>
                     {p.github_repo && <div className="rq-project-card-repo">{p.github_repo}</div>}
                     {p.description && <div className="rq-project-card-desc">{p.description}</div>}
-                    <div className="rq-project-card-meta">{p.order_count || 0} orders</div>
+                    <div className="rq-project-card-meta">{p.order_count || 0} pedido{(p.order_count||0)!==1?'s':''}</div>
                   </div>
                 </div>
               ))}
@@ -772,7 +772,7 @@ export default function App() {
       />
       {activityLogs.length > 0 && (
         <div className="rq-exec-section">
-          <div className="rq-section-label">Activity</div>
+          <div className="rq-section-label">Atividade</div>
           <div className="rq-activity-list">
             {activityLogs.slice(-8).map((l,i) => (
               <div key={i} className="rq-activity-row">
@@ -797,7 +797,7 @@ export default function App() {
           <span className="rq-header-logo">Orchestra</span>
           <div className="rq-header-sep"/>
           <div className="rq-header-actions">
-            <button className="rq-nav-btn" onClick={() => openSettings(project)}>⚙ Settings</button>
+            <button className="rq-nav-btn" onClick={() => openSettings(project)}>⚙ Configurações</button>
           </div>
         </div>
       </header>
@@ -805,7 +805,7 @@ export default function App() {
       <div className="rq-workspace">
         {/* ── Project Line ────────────────────────────────────────── */}
         <div className="rq-project-line">
-          <button className="rq-back-btn" onClick={goHome}>← Projects</button>
+          <button className="rq-back-btn" onClick={goHome}>← Projetos</button>
           <div className="rq-header-sep"/>
           <span className="rq-project-name">{project?.name}</span>
           {project?.github_repo && (
@@ -820,7 +820,7 @@ export default function App() {
             {/* Tablet: open drawer */}
             {selectedOrder && (
               <button className="rq-drawer-btn" onClick={() => setShowExecDrawer(true)}>
-                Execution ▸
+                Execução ▸
               </button>
             )}
           </div>
@@ -835,12 +835,12 @@ export default function App() {
           <div className="rq-panel rq-chat">
             <div className="rq-chat-header">
               <div>
-                <div className="rq-chat-header-title">Team conversation</div>
+                <div className="rq-chat-header-title">Conversa do time</div>
                 <div className="rq-chat-header-sub">
-                  {orders.length} order{orders.length !== 1 ? 's' : ''}
+                  {orders.length} pedido{orders.length !== 1 ? 's' : ''}
                   {isConnected
-                    ? <span style={{ color:'var(--rq-success)', marginLeft:8 }}>● Live</span>
-                    : <span style={{ color:'var(--rq-muted)', marginLeft:8 }}>○ Reconnecting…</span>}
+                    ? <span style={{ color:'var(--rq-success)', marginLeft:8 }}>● Ao vivo</span>
+                    : <span style={{ color:'var(--rq-muted)', marginLeft:8 }}>○ Reconectando…</span>}
                 </div>
               </div>
             </div>
@@ -848,8 +848,8 @@ export default function App() {
             {chatOrders.length === 0 ? (
               <div className="rq-chat-empty">
                 <div className="rq-chat-empty-icon">◎</div>
-                <div className="rq-chat-empty-title">Start a conversation</div>
-                <div className="rq-chat-empty-desc">Describe what you want to build and the agents will plan and execute it.</div>
+                <div className="rq-chat-empty-title">Inicie uma conversa</div>
+                <div className="rq-chat-empty-desc">Descreva o que quer construir e os agentes irão planejar e executar.</div>
               </div>
             ) : (
               <div className="rq-messages" role="log" aria-live="polite" aria-atomic="false">
@@ -888,7 +888,7 @@ export default function App() {
         onClick={() => setShowExecDrawer(false)}/>
       <div className={`rq-exec-drawer${showExecDrawer?' open':''}`}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 24px', borderBottom:'1px solid var(--rq-border)' }}>
-          <span style={{ font:'600 15px/22px var(--rq-font)' }}>Execution</span>
+          <span style={{ font:'600 15px/22px var(--rq-font)' }}>Execução</span>
           <button className="rq-icon-btn" onClick={() => setShowExecDrawer(false)}>✕</button>
         </div>
         {execPanel}

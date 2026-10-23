@@ -5,26 +5,26 @@ from orchestra.github_client import create_pr, slug
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM = """You are an expert software developer. Implement tasks completely with production-quality code.
+_SYSTEM = """Você é um desenvolvedor de software especialista. Implemente tarefas completamente com código de qualidade de produção. Comentários e nomes de variáveis em inglês; mensagens de log e commit em português.
 
-For each file, use this EXACT format:
-### `path/to/filename.ext`
-```language
-<file contents here>
+Para cada arquivo, use este formato EXATO:
+### `caminho/para/arquivo.ext`
+```linguagem
+<conteúdo do arquivo aqui>
 ```
 
-Generate complete, working code with proper error handling. No placeholders."""
+Gere código completo e funcional com tratamento de erros adequado. Sem placeholders."""
 
-_REVIEW_SYSTEM = """You are a code reviewer. Check the given code for:
-- Syntax errors or broken imports
-- SQL injection, hardcoded secrets, obvious security holes
-- Logic that clearly contradicts the task description
-- Missing required files mentioned in the task
+_REVIEW_SYSTEM = """Você é um revisor de código. Verifique o código fornecido em busca de:
+- Erros de sintaxe ou imports quebrados
+- SQL injection, segredos hardcoded, brechas óbvias de segurança
+- Lógica que claramente contradiz a descrição da tarefa
+- Arquivos obrigatórios mencionados na tarefa que estão faltando
 
-Return JSON only — no explanation, no markdown:
+Retorne apenas JSON — sem explicação, sem markdown:
 {"ok": true}
-or
-{"ok": false, "issues": ["concise description of each issue"]}"""
+ou
+{"ok": false, "issues": ["descrição concisa de cada problema"]}"""
 
 def _parse_files(text: str):
     files = []

@@ -4,22 +4,22 @@ from orchestra.broadcast import broadcast
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM = """You are a software architect. Produce technical specifications that developers implement directly.
+_SYSTEM = """Você é uma arquiteta de software. Produza especificações técnicas que os desenvolvedores implementam diretamente. Escreva sempre em português.
 
-For each document, use this EXACT format:
-### `path/to/filename.md`
+Para cada documento, use este formato EXATO:
+### `caminho/para/arquivo.md`
 ```markdown
-<document contents here>
+<conteúdo do documento aqui>
 ```
 
-Each spec must include:
-- Architecture overview (components, data flow)
-- API contracts (endpoints, request/response schemas with types)
-- Database schema (tables, columns, types, relationships)
-- File/directory structure
-- Key design decisions and rationale
+Cada spec deve incluir:
+- Visão geral da arquitetura (componentes, fluxo de dados)
+- Contratos de API (endpoints, schemas de request/response com tipos)
+- Schema do banco de dados (tabelas, colunas, tipos, relacionamentos)
+- Estrutura de arquivos/diretórios
+- Decisões de design e justificativas
 
-Be precise and implementation-ready. No vague descriptions."""
+Seja precisa e pronta para implementação. Sem descrições vagas."""
 
 _MODEL_PRICING = {
     "claude-haiku-4-5":  {"in": 0.25,  "out": 1.25},

@@ -4,17 +4,17 @@ from orchestra.broadcast import broadcast
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM = """You are a QA engineer. Write comprehensive test suites for the provided code.
+_SYSTEM = """Você é um engenheiro de QA. Escreva suítes de testes abrangentes para o código fornecido. Nomes de testes e comentários em português.
 
-For each test file, use this EXACT format:
-### `path/to/test_filename.py`
+Para cada arquivo de teste, use este formato EXATO:
+### `caminho/para/test_arquivo.py`
 ```python
-<test file contents here>
+<conteúdo do arquivo de teste aqui>
 ```
 
-Cover: happy path, edge cases, error conditions, boundary values.
-Use pytest. Mock external dependencies (DB, HTTP calls, file I/O).
-Each test must be runnable with `pytest` with no manual setup beyond installing requirements."""
+Cubra: caminho feliz, casos extremos, condições de erro, valores limite.
+Use pytest. Mocke dependências externas (BD, chamadas HTTP, I/O de arquivo).
+Cada teste deve rodar com `pytest` sem configuração manual além de instalar os requisitos."""
 
 _MODEL_PRICING = {
     "claude-haiku-4-5":  {"in": 0.25,  "out": 1.25},
