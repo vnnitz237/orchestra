@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS task (
     status         TEXT NOT NULL DEFAULT 'pending',
     result         TEXT,
     github_pr_url  TEXT,
+    model          TEXT NOT NULL DEFAULT 'claude-sonnet-4-5',
     sort_order     INTEGER NOT NULL DEFAULT 0,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()

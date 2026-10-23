@@ -71,6 +71,7 @@ function TaskRow({ task }) {
         <div className="task-title">{task.title}</div>
         {task.description && <div className="task-desc">{task.description}</div>}
         <div className="task-meta-row">
+          {task.model && <span className="task-model">{task.model.replace('claude-','').replace('-4-5','')}</span>}
           {task.cost_usd > 0 && <span className="task-cost">${Number(task.cost_usd).toFixed(4)} · {task.tokens} tokens</span>}
           {task.github_pr_url && (
             <a className="pr-link" href={task.github_pr_url} target="_blank" rel="noreferrer">

@@ -34,7 +34,12 @@ async def redis_relay():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await get_pool()
+    pool = await get_pool()
+    # Auto-migrate: add columns introduced after initial schema
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "ALTER TABLE task ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT 'claude-sonnet-4-5'"
+        )
     asyncio.create_task(redis_relay())
     yield
     await close_pool()
@@ -109,7 +114,7 @@ async def get_tasks(order_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT id, order_id, project_id, title, description, agent_type, status, result, github_pr_url, sort_order, created_at, updated_at FROM task WHERE order_id=$1 ORDER BY sort_order",
+            "SELECT id, order_id, project_id, title, description, agent_type, model, status, result, github_pr_url, sort_order, created_at, updated_at FROM task WHERE order_id=$1 ORDER BY sort_order",
             order_id)
         return [dict(r) for r in rows]
 

@@ -32,9 +32,13 @@ def _parse_files(text: str):
             files.append({"path": f"generated/file_{i+1}.{ext}", "content": c.strip()})
     return files
 
-# Pricing for claude-sonnet-4-5 per million tokens
-_PRICE_IN  = 3.0   # $3/M input tokens
-_PRICE_OUT = 15.0  # $15/M output tokens
+# Pricing per million tokens
+_MODEL_PRICING = {
+    "claude-haiku-4-5":  {"in": 0.25,  "out": 1.25},
+    "claude-sonnet-4-5": {"in": 3.0,   "out": 15.0},
+    "claude-opus-4-5":   {"in": 15.0,  "out": 75.0},
+}
+_DEFAULT_MODEL = "claude-sonnet-4-5"
 
 async def execute_task(task_id: str, project_id: str) -> None:
     pool = await get_pool()
@@ -47,7 +51,7 @@ async def execute_task(task_id: str, project_id: str) -> None:
 
         await conn.execute("UPDATE task SET status='executing', updated_at=NOW() WHERE id=$1", task_id)
         await broadcast(project_id, {"type": "task_updated", "task_id": task_id, "status": "executing"})
-        await broadcast(project_id, {"type": "activity", "task_id": task_id, "msg": f"Developer starting: {task['title']}"})
+        await broadcast(project_id, {"type": "activity", "task_id": task_id, "msg": f"Developer starting [{model.split('-')[1]}]: {task['title']}"})
 
         exec_id = str(uuid.uuid4())
         await conn.execute("""
@@ -61,6 +65,8 @@ async def execute_task(task_id: str, project_id: str) -> None:
         github_repo = project['github_repo'] if project else None
         order_title = order['title'] if order else ""
         order_id = str(task['order_id'])
+        model = task.get('model') or _DEFAULT_MODEL
+        pricing = _MODEL_PRICING.get(model, _MODEL_PRICING[_DEFAULT_MODEL])
 
         repo_hint = f" (GitHub: {github_repo})" if github_repo else ""
         user_prompt = (
@@ -76,11 +82,11 @@ async def execute_task(task_id: str, project_id: str) -> None:
         cost = 0.0
 
         try:
-            # Sonnet: ~5x cheaper than Opus, still excellent for code generation
+            # Model chosen by coordinator based on task complexity
             # Streaming: activity feed shows progress in real time
             # Prompt caching on system prompt: 90% discount after first call
             with client.messages.stream(
-                model="claude-sonnet-4-5",
+                model=model,
                 max_tokens=4096,
                 system=[{"type": "text", "text": _SYSTEM, "cache_control": {"type": "ephemeral"}}],
                 messages=[{"role": "user", "content": user_prompt}]
@@ -103,7 +109,7 @@ async def execute_task(task_id: str, project_id: str) -> None:
                 tokens_in = final.usage.input_tokens
                 tokens_out = final.usage.output_tokens
                 cache_hit = getattr(final.usage, 'cache_read_input_tokens', 0)
-                cost = (tokens_in * _PRICE_IN + tokens_out * _PRICE_OUT) / 1_000_000
+                cost = (tokens_in * pricing["in"] + tokens_out * pricing["out"]) / 1_000_000
 
         except Exception as e:
             logger.error(f"Developer failed task={task_id}: {e}")

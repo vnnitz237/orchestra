@@ -137,6 +137,7 @@ body { background: var(--bg); color: var(--fg); min-height: 100vh; }
 .pr-link:hover { text-decoration: underline; }
 .task-meta-row { display: flex; align-items: center; gap: 10px; margin-top: 3px; flex-wrap: wrap; }
 .task-cost { font-size: 0.72rem; color: var(--fg2); font-family: ui-monospace, monospace; }
+.task-model { font-size: 0.68rem; font-weight: 600; color: var(--accent); background: var(--accent-soft,#ede9fe); padding: 1px 6px; border-radius: 4px; font-family: ui-monospace, monospace; }
 
 .order-cost { font-size: 0.7rem; color: #059669; font-weight: 600; font-family: ui-monospace, monospace; }
 .order-cost-detail { font-size: 0.75rem; color: var(--fg2); padding: 6px 0 8px; font-family: ui-monospace, monospace; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
