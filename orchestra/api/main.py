@@ -156,9 +156,18 @@ async def _run_coordinator(order_id: str):
 async def get_tasks(order_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, order_id, project_id, title, description, agent_type, model, status, result, github_pr_url, sort_order, created_at, updated_at FROM task WHERE order_id=$1 ORDER BY sort_order",
-            order_id)
+        rows = await conn.fetch("""
+            SELECT t.id, t.order_id, t.project_id, t.title, t.description, t.agent_type,
+                   t.model, t.status, t.result, t.github_pr_url, t.sort_order,
+                   t.created_at, t.updated_at,
+                   COALESCE(SUM(e.cost_usd), 0)     AS cost_usd,
+                   COALESCE(SUM(e.tokens_used), 0)  AS tokens_used
+            FROM task t
+            LEFT JOIN execution e ON e.task_id = t.id AND e.status = 'completed'
+            WHERE t.order_id = $1
+            GROUP BY t.id
+            ORDER BY t.sort_order
+        """, order_id)
         return [dict(r) for r in rows]
 
 @app.post("/api/tasks/{task_id}/retry")

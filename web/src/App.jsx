@@ -185,6 +185,8 @@ export default function App() {
   const [settingsAutonomy, setSettingsAutonomy] = useState('delegated')
   const [settingsBudget, setSettingsBudget] = useState('')
   const wsRef = useRef(null)
+  const wsProjectRef = useRef(null)
+  const reconnectTimer = useRef(null)
 
   const loadOrderCost = async (orderId) => {
     const r = await fetch(`/api/orders/${orderId}/cost`)
@@ -219,7 +221,7 @@ export default function App() {
     for (const o of data.orders || []) {
       const tr = await fetch(`/api/orders/${o.id}/tasks`)
       const td = await tr.json()
-      setTasks(prev => ({ ...prev, [o.id]: td }))
+      setTasks(prev => ({ ...prev, [o.id]: td.map(t => ({ ...t, tokens: t.tokens_used })) }))
       loadOrderCost(o.id)
     }
     const ar = await fetch(`/api/projects/${p.id}/artifacts`)
@@ -227,43 +229,83 @@ export default function App() {
     connectWs(p.id)
   }
 
-  const connectWs = (projectId) => {
-    if (wsRef.current) wsRef.current.close()
+  const handleWsMessage = useCallback((e) => {
+    const ev = JSON.parse(e.data)
+    if (ev.type === 'order_updated') {
+      setOrders(prev => prev.map(o => o.id === ev.order_id ? { ...o, status: ev.status } : o))
+      if (ev.status === 'completed' || ev.status === 'awaiting_approval') {
+        const pid = wsProjectRef.current
+        if (pid) fetch(`/api/projects/${pid}/artifacts`).then(r => r.json()).then(setArtifacts)
+        fetch(`/api/orders/${ev.order_id}/cost`).then(r => r.json()).then(d =>
+          setCosts(prev => ({ ...prev, [ev.order_id]: d })))
+      }
+    } else if (ev.type === 'task_created') {
+      setTasks(prev => ({
+        ...prev,
+        [ev.task.order_id]: [...(prev[ev.task.order_id] || []), ev.task]
+      }))
+      setExpandedOrders(prev => ({ ...prev, [ev.task.order_id]: true }))
+    } else if (ev.type === 'task_updated') {
+      setTasks(prev => {
+        const next = {}
+        for (const [k, v] of Object.entries(prev)) {
+          next[k] = v.map(t => t.id === ev.task_id
+            ? { ...t, status: ev.status, github_pr_url: ev.github_pr_url || t.github_pr_url,
+                cost_usd: ev.cost_usd ?? t.cost_usd, tokens: ev.tokens ?? t.tokens }
+            : t)
+        }
+        return next
+      })
+    } else if (ev.type === 'activity') {
+      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      setActivityLogs(prev => [...prev.slice(-99), { msg: ev.msg, time: now, task_id: ev.task_id }])
+    }
+  }, [])
+
+  const connectWs = useCallback((projectId) => {
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+    if (wsRef.current) { wsRef.current.onclose = null; wsRef.current.close() }
+    wsProjectRef.current = projectId
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(`${proto}://${window.location.host}/ws/${projectId}`)
-    ws.onmessage = (e) => {
-      const ev = JSON.parse(e.data)
-      if (ev.type === 'order_updated') {
-        setOrders(prev => prev.map(o => o.id === ev.order_id ? { ...o, status: ev.status } : o))
-        if (ev.status === 'completed') {
-          fetch(`/api/projects/${projectId}/artifacts`).then(r => r.json()).then(setArtifacts)
-          fetch(`/api/orders/${ev.order_id}/cost`).then(r => r.json()).then(d =>
-            setCosts(prev => ({ ...prev, [ev.order_id]: d })))
-        }
-      } else if (ev.type === 'task_created') {
-        setTasks(prev => ({
-          ...prev,
-          [ev.task.order_id]: [...(prev[ev.task.order_id] || []), ev.task]
-        }))
-        setExpandedOrders(prev => ({ ...prev, [ev.task.order_id]: true }))
-      } else if (ev.type === 'task_updated') {
-        setTasks(prev => {
-          const next = {}
-          for (const [k, v] of Object.entries(prev)) {
-            next[k] = v.map(t => t.id === ev.task_id
-              ? { ...t, status: ev.status, github_pr_url: ev.github_pr_url || t.github_pr_url,
-                  cost_usd: ev.cost_usd ?? t.cost_usd, tokens: ev.tokens ?? t.tokens }
-              : t)
-          }
-          return next
-        })
-      } else if (ev.type === 'activity') {
-        const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-        setActivityLogs(prev => [...prev.slice(-99), { msg: ev.msg, time: now, task_id: ev.task_id }])
-      }
+    ws.onmessage = handleWsMessage
+    ws.onclose = () => {
+      if (wsProjectRef.current !== projectId) return
+      reconnectTimer.current = setTimeout(() => connectWs(projectId), 3000)
     }
     wsRef.current = ws
-  }
+  }, [handleWsMessage])
+
+  // Polling fallback: re-fetch tasks for active orders every 6s
+  useEffect(() => {
+    if (page !== 'project' || !project) return
+    const ACTIVE = new Set(['pending', 'analyzing', 'executing'])
+    const poll = async () => {
+      const activeOrders = orders.filter(o => ACTIVE.has(o.status))
+      if (!activeOrders.length) return
+      for (const o of activeOrders) {
+        const tr = await fetch(`/api/orders/${o.id}/tasks`).catch(() => null)
+        if (!tr || !tr.ok) continue
+        const td = await tr.json()
+        setTasks(prev => ({
+          ...prev,
+          [o.id]: td.map(t => ({ ...t, tokens: t.tokens_used }))
+        }))
+        const cr = await fetch(`/api/orders/${o.id}/cost`).catch(() => null)
+        if (cr && cr.ok) {
+          const cd = await cr.json()
+          setCosts(prev => ({ ...prev, [o.id]: cd }))
+        }
+      }
+      const pr = await fetch(`/api/projects/${project.id}`).catch(() => null)
+      if (pr && pr.ok) {
+        const pd = await pr.json()
+        setOrders(pd.orders || [])
+      }
+    }
+    const id = setInterval(poll, 6000)
+    return () => clearInterval(id)
+  }, [page, project, orders])
 
   const openSettings = (p) => {
     setSettingsAutonomy(p.autonomy || 'delegated')
@@ -394,6 +436,8 @@ export default function App() {
       <header className="top-bar">
         <button className="btn-ghost" onClick={() => {
           setPage('home'); loadProjects();
+          wsProjectRef.current = null
+          if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
           if (wsRef.current) wsRef.current.close()
           try { localStorage.removeItem('orchestra_project') } catch {}
         }}>← Projects</button>
