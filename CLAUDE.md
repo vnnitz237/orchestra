@@ -1,7 +1,8 @@
 # Orchestra — CLAUDE.md
 
-> Leia este arquivo inteiro antes de fazer qualquer mudança.
-> Se você chegou aqui a partir de um novo contexto (tokens esgotados), este documento contém tudo que você precisa para continuar o desenvolvimento.
+> **Leia este arquivo inteiro antes de fazer qualquer mudança.**
+> Este documento é a fonte única de verdade do projeto. Foi escrito para ser lido por qualquer IA (Claude, ChatGPT, Gemini, etc.) ou humano que precise continuar o desenvolvimento sem histórico de conversa anterior.
+> Se você é uma IA: siga as restrições de segurança à risca, nunca faça push para main/master, nunca use `docker compose down -v`.
 
 ---
 
@@ -170,12 +171,14 @@ branch: claude/beautiful-feynman-svm3hg
 remote: origin → https://github.com/vnnitz237/orchestra
 ```
 
-Para continuar de um novo contexto:
+Para continuar de qualquer IA/sessão nova:
 ```bash
-cd /home/user/orchestra
-git fetch origin claude/beautiful-feynman-svm3hg
+git clone https://github.com/vnnitz237/orchestra
+cd orchestra
 git checkout claude/beautiful-feynman-svm3hg
 ```
+
+> **Nota:** O desenvolvimento iniciado no Claude Code (Anthropic) continuará no ChatGPT ou outra IA. Este CLAUDE.md garante continuidade total — toda decisão de arquitetura, padrão de código e restrição de segurança está documentada aqui.
 
 ---
 
@@ -381,21 +384,32 @@ result = await asyncio.to_thread(funcao_sincrona, arg1, arg2)
 
 - [ ] Histórico de versões de artefatos por task
 - [ ] Notificações push/email ao concluir pedidos
-- [ ] Notificações push/email ao concluir pedidos
+- [ ] Painel de configuração de agentes (trocar modelo por task)
+- [ ] Suporte a múltiplos usuários / autenticação
 
 ---
 
 ## Atribuição para commits e PRs
 
-Todo commit deve terminar com:
+Adapte conforme a IA usada na sessão. Exemplos:
+
+**Claude Code:**
 ```
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_01F1EtC85qyhXtzLDS3ba59D
 ```
 
-Todo PR deve terminar com:
+**ChatGPT / outros:**
 ```
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+Co-Authored-By: AI Assistant <noreply@openai.com>
+```
 
-https://claude.ai/code/session_01F1EtC85qyhXtzLDS3ba59D
-```
+Todo PR deve identificar a IA usada na descrição.
+
+---
+
+## Histórico de sessões
+
+| Data | IA | Trabalho realizado |
+|------|----|--------------------|
+| 2026-10 | Claude Sonnet 4.6 (Anthropic) | Setup inicial, todos os agentes, scroll fix, dark mode → branco definitivo, sandbox execution |
+| próxima | ChatGPT | a definir |
