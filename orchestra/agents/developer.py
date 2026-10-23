@@ -5,7 +5,6 @@ from orchestra.github_client import create_pr, slug
 
 logger = logging.getLogger(__name__)
 
-# Cached system prompt — saves 90% on input tokens after first call
 _SYSTEM = """You are an expert software developer. Implement tasks completely with production-quality code.
 
 For each file, use this EXACT format:
@@ -15,6 +14,17 @@ For each file, use this EXACT format:
 ```
 
 Generate complete, working code with proper error handling. No placeholders."""
+
+_REVIEW_SYSTEM = """You are a code reviewer. Check the given code for:
+- Syntax errors or broken imports
+- SQL injection, hardcoded secrets, obvious security holes
+- Logic that clearly contradicts the task description
+- Missing required files mentioned in the task
+
+Return JSON only — no explanation, no markdown:
+{"ok": true}
+or
+{"ok": false, "issues": ["concise description of each issue"]}"""
 
 def _parse_files(text: str):
     files = []
@@ -32,6 +42,18 @@ def _parse_files(text: str):
             files.append({"path": f"generated/file_{i+1}.{ext}", "content": c.strip()})
     return files
 
+def _review_snippet(files: list) -> str:
+    """Build a compact code snippet for the reviewer (max ~4000 chars)."""
+    parts = []
+    budget = 4000
+    for f in files[:5]:
+        snippet = f['content'][:min(900, budget)]
+        parts.append(f"### `{f['path']}`\n```\n{snippet}\n```")
+        budget -= len(snippet)
+        if budget <= 0:
+            break
+    return "\n\n".join(parts)
+
 # Pricing per million tokens
 _MODEL_PRICING = {
     "claude-haiku-4-5":  {"in": 0.25,  "out": 1.25},
@@ -39,6 +61,8 @@ _MODEL_PRICING = {
     "claude-opus-4-5":   {"in": 15.0,  "out": 75.0},
 }
 _DEFAULT_MODEL = "claude-sonnet-4-5"
+_HAIKU_PRICING = _MODEL_PRICING["claude-haiku-4-5"]
+
 
 async def execute_task(task_id: str, project_id: str) -> None:
     pool = await get_pool()
@@ -69,7 +93,8 @@ async def execute_task(task_id: str, project_id: str) -> None:
 
         await conn.execute("UPDATE task SET status='executing', updated_at=NOW() WHERE id=$1", task_id)
         await broadcast(project_id, {"type": "task_updated", "task_id": task_id, "status": "executing"})
-        await broadcast(project_id, {"type": "activity", "task_id": task_id, "msg": f"Developer starting [{model.split('-')[1]}]: {task['title']}"})
+        await broadcast(project_id, {"type": "activity", "task_id": task_id,
+            "msg": f"Developer starting [{model.split('-')[1]}]: {task['title']}"})
 
         exec_id = str(uuid.uuid4())
         await conn.execute("""
@@ -78,13 +103,13 @@ async def execute_task(task_id: str, project_id: str) -> None:
         """, exec_id, task_id, 'developer',
             json.dumps({"title": task['title'], "description": task['description']}))
 
-        client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         project_name = project['name'] if project else "Software project"
         github_repo = project['github_repo'] if project else None
         order_title = order['title'] if order else ""
         order_id = str(task['order_id'])
 
-        # Build context from completed dependency tasks
+        # Context from completed dependency tasks
         dep_context = ""
         try:
             dep_ids = json.loads(task.get('depends_on') or '[]')
@@ -97,8 +122,8 @@ async def execute_task(task_id: str, project_id: str) -> None:
                         continue
                     try:
                         r = json.loads(dep['result'] or '{}')
-                        files = [a['path'] for a in r.get('artifacts', [])]
-                        parts.append(f"• {dep['title']}: created {', '.join(files) if files else 'no files'}")
+                        files_list = [a['path'] for a in r.get('artifacts', [])]
+                        parts.append(f"• {dep['title']}: created {', '.join(files_list) if files_list else 'no files'}")
                     except Exception:
                         parts.append(f"• {dep['title']}: completed")
                 if parts:
@@ -107,7 +132,7 @@ async def execute_task(task_id: str, project_id: str) -> None:
             logger.warning(f"Could not load dep context for task={task_id}: {e}")
 
         repo_hint = f" (GitHub: {github_repo})" if github_repo else ""
-        user_prompt = (
+        base_prompt = (
             f"Project: {project_name}{repo_hint}\n"
             f"Order: {order_title}\n"
             f"Task: {task['title']}\n"
@@ -115,40 +140,81 @@ async def execute_task(task_id: str, project_id: str) -> None:
             f"{dep_context}"
         )
 
-        response_chunks = []
-        tokens_in = 0
-        tokens_out = 0
+        tokens_in = tokens_out = 0
         cost = 0.0
 
-        try:
-            # Model chosen by coordinator based on task complexity
-            # Streaming: activity feed shows progress in real time
-            # Prompt caching on system prompt: 90% discount after first call
-            with client.messages.stream(
-                model=model,
-                max_tokens=4096,
+        async def _stream_generate(prompt: str) -> tuple[str, int, int]:
+            chunks = []
+            async with client.messages.stream(
+                model=model, max_tokens=4096,
                 system=[{"type": "text", "text": _SYSTEM, "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": user_prompt}]
+                messages=[{"role": "user", "content": prompt}]
             ) as stream:
                 char_buf = ""
-                for text_delta in stream.text_stream:
-                    response_chunks.append(text_delta)
-                    char_buf += text_delta
-                    # Broadcast every ~120 chars to avoid flooding WebSocket
+                async for delta in stream.text_stream:
+                    chunks.append(delta)
+                    char_buf += delta
                     if len(char_buf) >= 120:
                         preview = char_buf.replace('\n', ' ').strip()[:80]
                         if preview:
-                            await broadcast(project_id, {
-                                "type": "activity", "task_id": task_id,
-                                "msg": f"Writing: {preview}…"
-                            })
+                            await broadcast(project_id, {"type": "activity", "task_id": task_id,
+                                "msg": f"Writing: {preview}…"})
                         char_buf = ""
+                final = await stream.get_final_message()
+                return "".join(chunks), final.usage.input_tokens, final.usage.output_tokens
 
-                final = stream.get_final_message()
-                tokens_in = final.usage.input_tokens
-                tokens_out = final.usage.output_tokens
-                cache_hit = getattr(final.usage, 'cache_read_input_tokens', 0)
-                cost = (tokens_in * pricing["in"] + tokens_out * pricing["out"]) / 1_000_000
+        try:
+            # — First pass —
+            response_text, ti, to = await _stream_generate(base_prompt)
+            tokens_in += ti; tokens_out += to
+            cost += (ti * pricing["in"] + to * pricing["out"]) / 1_000_000
+            files = _parse_files(response_text)
+
+            # — Review pass (Haiku, cheap) —
+            if files:
+                await broadcast(project_id, {"type": "activity", "task_id": task_id,
+                    "msg": f"Reviewing {len(files)} file(s)…"})
+                snippet = _review_snippet(files)
+                review_task_ctx = f"Task: {task['title']}\nDetails: {task['description']}\n\nGenerated code:\n{snippet}"
+                try:
+                    rev_msg = await client.messages.create(
+                        model="claude-haiku-4-5", max_tokens=300,
+                        system=_REVIEW_SYSTEM,
+                        messages=[{"role": "user", "content": review_task_ctx}])
+                    rev_text = rev_msg.content[0].text.strip()
+                    rev_text = re.sub(r'^```[a-z]*\n?', '', rev_text)
+                    rev_text = re.sub(r'\n?```$', '', rev_text)
+                    review = json.loads(rev_text)
+                    rev_ti = rev_msg.usage.input_tokens
+                    rev_to = rev_msg.usage.output_tokens
+                    tokens_in += rev_ti; tokens_out += rev_to
+                    cost += (rev_ti * _HAIKU_PRICING["in"] + rev_to * _HAIKU_PRICING["out"]) / 1_000_000
+                except Exception as re_err:
+                    logger.warning(f"Review parse failed: {re_err}")
+                    review = {"ok": True}
+
+                if not review.get("ok") and review.get("issues"):
+                    issues = review["issues"]
+                    issues_summary = "; ".join(str(i) for i in issues[:3])
+                    await broadcast(project_id, {"type": "activity", "task_id": task_id,
+                        "msg": f"Issues found — fixing: {issues_summary[:100]}"})
+                    logger.info(f"Review found {len(issues)} issue(s) in task={task_id}, re-generating")
+
+                    # — Fix pass —
+                    issues_text = "\n".join(f"- {i}" for i in issues)
+                    fix_prompt = base_prompt + f"\n\nIMPORTANT — fix these issues in your implementation:\n{issues_text}"
+                    response_text2, ti2, to2 = await _stream_generate(fix_prompt)
+                    tokens_in += ti2; tokens_out += to2
+                    cost += (ti2 * pricing["in"] + to2 * pricing["out"]) / 1_000_000
+                    files2 = _parse_files(response_text2)
+                    if files2:
+                        files = files2
+                        response_text = response_text2
+                    await broadcast(project_id, {"type": "activity", "task_id": task_id,
+                        "msg": f"Fixed and re-generated {len(files)} file(s)"})
+                else:
+                    await broadcast(project_id, {"type": "activity", "task_id": task_id,
+                        "msg": "Code review passed ✓"})
 
         except Exception as e:
             logger.error(f"Developer failed task={task_id}: {e}")
@@ -157,10 +223,8 @@ async def execute_task(task_id: str, project_id: str) -> None:
             await broadcast(project_id, {"type": "task_updated", "task_id": task_id, "status": "failed"})
             return
 
-        response_text = "".join(response_chunks)
-        files = _parse_files(response_text)
         await broadcast(project_id, {"type": "activity", "task_id": task_id,
-            "msg": f"Generated {len(files)} file(s) — ${cost:.4f} ({tokens_in+tokens_out} tokens)"})
+            "msg": f"Done — {len(files)} file(s) · ${cost:.4f} ({tokens_in+tokens_out} tokens)"})
 
         artifact_ids = []
         for f in files:
@@ -179,7 +243,8 @@ async def execute_task(task_id: str, project_id: str) -> None:
         pr_url = None
         if github_repo and files:
             try:
-                await broadcast(project_id, {"type": "activity", "task_id": task_id, "msg": f"Opening PR on {github_repo}..."})
+                await broadcast(project_id, {"type": "activity", "task_id": task_id,
+                    "msg": f"Opening PR on {github_repo}..."})
                 branch_name = f"orchestra/{order_id[:8]}/{slug(task['title'])}"
                 pr_body = (
                     f"Generated by Orchestra\n\n"
