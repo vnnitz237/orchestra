@@ -445,7 +445,7 @@ export default function App() {
   const reconnectTimer = useRef(null)
   const projectRef = useRef(null)
   const ordersRef = useRef([])
-  const messagesEndRef = useRef(null)
+  const messagesRef = useRef(null)
 
   // ── Data loaders ───────────────────────────────────────────────────────────
   const loadOrderCost = async (orderId) => {
@@ -594,10 +594,14 @@ export default function App() {
     return () => clearInterval(id)
   }, [page])
 
-  // Auto-scroll chat on new orders
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [orders.length])
+  const scrollToBottom = useCallback(() => {
+    const el = messagesRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [])
+
+  // Auto-scroll: new order sent or agent adds activity
+  useEffect(() => { scrollToBottom() }, [orders.length, scrollToBottom])
+  useEffect(() => { scrollToBottom() }, [activityLogs.length, scrollToBottom])
 
   // ── Actions ────────────────────────────────────────────────────────────────
   const openSettings = (p) => {
@@ -671,6 +675,7 @@ export default function App() {
     setSelectedOrderId(o.id)
     setComposerText('')
     loadOrderCost(o.id)
+    setTimeout(scrollToBottom, 50)
   }
 
   const goHome = () => {
@@ -895,7 +900,7 @@ export default function App() {
                 <div className="rq-chat-empty-desc">Descreva o que quer construir e os agentes irão planejar e executar.</div>
               </div>
             ) : (
-              <div className="rq-messages" role="log" aria-live="polite" aria-atomic="false">
+              <div ref={messagesRef} className="rq-messages" role="log" aria-live="polite" aria-atomic="false">
                 {chatOrders.map(o => (
                   <ChatMessage
                     key={o.id}
@@ -907,7 +912,6 @@ export default function App() {
                     onApprove={approveOrder}
                   />
                 ))}
-                <div ref={messagesEndRef}/>
               </div>
             )}
 
