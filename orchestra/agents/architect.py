@@ -124,3 +124,22 @@ async def execute_task(task_id: str, project_id: str) -> None:
             "status": "completed", "artifacts": artifact_ids,
             "cost_usd": float(cost), "tokens": tokens_in + tokens_out
         })
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        task = await conn.fetchrow("SELECT order_id FROM task WHERE id=$1", task_id)
+        if not task:
+            return
+        remaining = await conn.fetchval("""
+            SELECT COUNT(*) FROM task
+            WHERE order_id=$1 AND status NOT IN ('completed','failed')
+        """, task['order_id'])
+        if remaining == 0:
+            await conn.execute(
+                'UPDATE "order" SET status=\'completed\', updated_at=NOW() WHERE id=$1',
+                task['order_id'])
+            await broadcast(project_id, {
+                "type": "order_updated",
+                "order_id": str(task['order_id']),
+                "status": "completed"
+            })

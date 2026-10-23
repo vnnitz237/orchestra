@@ -318,6 +318,7 @@ button, a, input, textarea { -webkit-tap-highlight-color: transparent; }
 }
 .rq-artifact-row:hover { background: var(--rq-subtle); color: var(--rq-text); }
 .rq-artifact-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rq-artifact-kind { font: 500 10px/14px var(--rq-font); color: var(--rq-muted); background: var(--rq-subtle); border-radius: 4px; padding: 1px 5px; flex-shrink: 0; }
 .rq-artifact-actions { display: flex; gap: 8px; margin-top: 10px; }
 .rq-zip-btn {
   display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px;

@@ -187,12 +187,16 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
         <div className="rq-exec-section">
           <div className="rq-section-label">Generated files · {orderArtifacts.length}</div>
           <div className="rq-artifact-list">
-            {orderArtifacts.slice(0,12).map(a => (
-              <div key={a.id} className="rq-artifact-row" onClick={() => onArtifactClick(a)}>
-                <span style={{ fontSize:11 }}>📄</span>
-                <span className="rq-artifact-path">{a.path}</span>
-              </div>
-            ))}
+            {orderArtifacts.slice(0,12).map(a => {
+              const icon = a.kind === 'test' ? '🧪' : a.kind === 'spec' ? '📐' : '📄'
+              return (
+                <div key={a.id} className="rq-artifact-row" onClick={() => onArtifactClick(a)}>
+                  <span style={{ fontSize:11 }}>{icon}</span>
+                  <span className="rq-artifact-path">{a.path}</span>
+                  {a.kind !== 'code' && <span className="rq-artifact-kind">{a.kind}</span>}
+                </div>
+              )
+            })}
           </div>
           <div className="rq-artifact-actions">
             <a className="rq-zip-btn" href={`/api/orders/${order.id}/artifacts/download`} download>
