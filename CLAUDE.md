@@ -266,6 +266,83 @@ Disparado ao: criar order, receber activity log, via `scrollToBottom` callback.
 
 ---
 
+## SDK dos agentes — referência neutra
+
+Os agentes usam a biblioteca `anthropic` (Python). Esta seção explica a interface de forma independente de qual IA está lendo.
+
+### Instalação
+```
+pip install anthropic
+```
+
+### Cliente assíncrono (obrigatório — nunca use o síncrono)
+```python
+import anthropic, os
+
+client = anthropic.AsyncAnthropic(
+    api_key=os.environ["ANTHROPIC_API_KEY"],
+    timeout=180.0   # segundos — sempre definir
+)
+```
+
+### Criar uma mensagem (aguardar resposta completa)
+```python
+msg = await client.messages.create(
+    model="claude-haiku-4-5",   # ou claude-sonnet-4-5 / claude-opus-4-5
+    max_tokens=4096,
+    system="Você é um assistente...",   # string simples ou lista de blocos
+    messages=[{"role": "user", "content": "Olá"}]
+)
+text = msg.content[0].text
+tokens_in  = msg.usage.input_tokens
+tokens_out = msg.usage.output_tokens
+```
+
+### Streaming (usado em architect, developer, tester)
+```python
+chunks = []
+async with client.messages.stream(
+    model="claude-sonnet-4-5",
+    max_tokens=4096,
+    system=[{"type": "text", "text": "...", "cache_control": {"type": "ephemeral"}}],
+    messages=[{"role": "user", "content": prompt}]
+) as stream:
+    async for delta in stream.text_stream:
+        chunks.append(delta)
+        # delta é um fragmento de string — use para transmitir via WebSocket
+    final = await stream.get_final_message()
+    tokens_in  = final.usage.input_tokens
+    tokens_out = final.usage.output_tokens
+
+response_text = "".join(chunks)
+```
+
+### Modelos disponíveis e preços (por milhão de tokens)
+| Modelo | Input | Output | Uso nos agentes |
+|--------|-------|--------|-----------------|
+| `claude-haiku-4-5` | $0.25 | $1.25 | Coordinator, Tester, Review pass |
+| `claude-sonnet-4-5` | $3.00 | $15.00 | Architect, Developer (padrão) |
+| `claude-opus-4-5` | $15.00 | $75.00 | Tarefas complexas (sob demanda) |
+
+### Cálculo de custo
+```python
+cost = (tokens_in * preco_in + tokens_out * preco_out) / 1_000_000
+```
+
+### Cache de prompt (reduz custo em chamadas repetidas)
+Adicionar `"cache_control": {"type": "ephemeral"}` ao bloco de system prompt
+faz a API cachear o prefixo por até 5 minutos. Usado em todos os agentes.
+
+### Chamada síncrona dentro de contexto async
+`github_client.create_pr()` usa `PyGithub` que é síncrono. Para não bloquear
+o event loop do FastAPI, envolva em `asyncio.to_thread`:
+```python
+import asyncio
+result = await asyncio.to_thread(funcao_sincrona, arg1, arg2)
+```
+
+---
+
 ## Próximas etapas sugeridas
 
 - [ ] Redesign visual (fase adiada pelo usuário)
