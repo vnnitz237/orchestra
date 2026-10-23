@@ -5,6 +5,9 @@ from orchestra.github_client import read_repo_context
 
 logger = logging.getLogger(__name__)
 
+# System prompt cached — pays for itself after the first call
+_SYSTEM = "You are a software project coordinator. Break orders into 3-5 specific, actionable development tasks. Return ONLY a valid JSON array, no markdown, no explanation."
+
 async def process_order(order_id: str) -> None:
     pool = await get_pool()
     async with pool.acquire() as conn:
@@ -28,22 +31,30 @@ async def process_order(order_id: str) -> None:
         client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
         repo_section = f"\n\nRepository context:\n{repo_context}" if repo_context else ""
-        prompt = f"""You are a software project coordinator. Break this order into 3-5 specific, actionable development tasks.
-
-Order: {order['title']}
-Description: {order['description']}{repo_section}
-
-Return ONLY a JSON array (no markdown, no explanation):
-[{{"title": "...", "description": "detailed description of what to implement", "agent_type": "developer"}}]"""
+        user_prompt = (
+            f"Order: {order['title']}\n"
+            f"Description: {order['description']}{repo_section}\n\n"
+            f'Return JSON array:\n[{{"title":"...","description":"detailed description","agent_type":"developer"}}]'
+        )
 
         try:
+            # Haiku: 20x cheaper than Opus, sufficient for JSON planning
+            # Prompt caching on system prompt saves 90% on input tokens after first call
             msg = client.messages.create(
-                model="claude-opus-4-5", max_tokens=2048,
-                messages=[{"role": "user", "content": prompt}])
+                model="claude-haiku-4-5",
+                max_tokens=1024,
+                system=[{"type": "text", "text": _SYSTEM, "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": user_prompt}])
             text = msg.content[0].text.strip()
             text = re.sub(r'^```[a-z]*\n?', '', text)
             text = re.sub(r'\n?```$', '', text)
             tasks = json.loads(text)
+
+            tokens_in = msg.usage.input_tokens
+            tokens_out = msg.usage.output_tokens
+            cache_hit = getattr(msg.usage, 'cache_read_input_tokens', 0)
+            cost = (tokens_in * 0.00025 + tokens_out * 0.00125) / 1000
+            logger.info(f"Coordinator: {tokens_in}in/{tokens_out}out tokens, {cache_hit} cached, ${cost:.5f}")
         except Exception as e:
             logger.error(f"Coordinator failed order={order_id}: {e}")
             await conn.execute(
