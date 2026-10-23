@@ -501,17 +501,15 @@ export default function App() {
   const handleWsMessage = useCallback((e) => {
     const ev = JSON.parse(e.data)
     if (ev.type === 'order_updated') {
-      setOrders(prev => {
-        const order = prev.find(o => o.id === ev.order_id)
-        if (ev.status === 'completed') {
-          addToast('Pedido concluído', order?.title?.slice(0, 60), 'success')
-        } else if (ev.status === 'failed') {
-          addToast('Pedido falhou', order?.title?.slice(0, 60), 'error')
-        } else if (ev.status === 'awaiting_approval') {
-          addToast('Aguardando aprovação', order?.title?.slice(0, 60), 'info')
-        }
-        return prev.map(o => o.id === ev.order_id ? { ...o, status: ev.status } : o)
-      })
+      const order = ordersRef.current.find(o => o.id === ev.order_id)
+      if (ev.status === 'completed') {
+        addToast('Pedido concluído', order?.title?.slice(0, 60), 'success')
+      } else if (ev.status === 'failed') {
+        addToast('Pedido falhou', order?.title?.slice(0, 60), 'error')
+      } else if (ev.status === 'awaiting_approval') {
+        addToast('Aguardando aprovação', order?.title?.slice(0, 60), 'info')
+      }
+      setOrders(prev => prev.map(o => o.id === ev.order_id ? { ...o, status: ev.status } : o))
       if (ev.status === 'completed' || ev.status === 'awaiting_approval') {
         const pid = wsProjectRef.current
         if (pid) fetch(`/api/projects/${pid}/artifacts`).then(r => r.json()).then(setArtifacts)
@@ -540,7 +538,7 @@ export default function App() {
       const now = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })
       setActivityLogs(prev => [...prev.slice(-99), { msg: ev.msg, time: now, task_id: ev.task_id }])
     }
-  }, [addToast])
+  }, [addToast, ordersRef])
 
   const connectWs = useCallback((projectId) => {
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
