@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS project (
     name        TEXT NOT NULL,
     description TEXT,
     github_repo TEXT,
+    notification_email TEXT,
     autonomy    TEXT NOT NULL DEFAULT 'delegated',  -- planning | supervised | delegated
     budget_usd  DECIMAL(10,2),                       -- NULL = unlimited
     status      TEXT NOT NULL DEFAULT 'active',
@@ -64,3 +65,16 @@ CREATE TABLE IF NOT EXISTS artifact (
 
 CREATE UNIQUE INDEX IF NOT EXISTS artifact_task_path_version_idx
     ON artifact (task_id, kind, path, version);
+
+CREATE TABLE IF NOT EXISTS notification_delivery (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id     UUID NOT NULL REFERENCES "order"(id) ON DELETE CASCADE,
+    channel      TEXT NOT NULL,
+    recipient    TEXT NOT NULL,
+    order_status TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'pending',
+    error        TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    sent_at      TIMESTAMPTZ,
+    UNIQUE (order_id, channel, recipient, order_status)
+);

@@ -101,10 +101,8 @@ async def process_order(order_id: str) -> None:
 
         except Exception as e:
             logger.error(f"Coordinator failed order={order_id}: {e}")
-            await conn.execute(
-                'UPDATE "order" SET status=$1, updated_at=NOW() WHERE id=$2',
-                'failed', order_id)
-            await broadcast(project_id, {"type": "order_updated", "order_id": order_id, "status": "failed"})
+            from orchestra.orders import set_order_final_status
+            await set_order_final_status(order_id, project_id, "failed")
             return
 
         task_ids = []

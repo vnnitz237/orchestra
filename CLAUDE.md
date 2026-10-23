@@ -64,6 +64,7 @@ project
   id, name, description, github_repo
   autonomy: 'delegated' | 'supervised' | 'planning'
   budget_usd: decimal (nullable)
+  notification_email: text (nullable)
 
 order  (pedido do usuário)
   id, project_id, title, description
@@ -213,6 +214,7 @@ cd web && npm ci && npm run build
 | GET | `/api/orders/{id}/tasks` | Tasks com cost_usd, tokens_used, last_error |
 | POST | `/api/orders/{id}/approve` | Aprova execução (autonomy=planning) |
 | GET | `/api/orders/{id}/cost` | Custo total do pedido |
+| GET | `/api/orders/{id}/notifications` | Entregas de notificação do pedido |
 | POST | `/api/tasks/{id}/retry` | Retenta task com status 'failed' |
 | POST | `/api/tasks/{id}/execute` | Executa artefatos Python em sandbox (novo) |
 | GET | `/api/projects/{id}/artifacts` | Lista artefatos |
@@ -392,7 +394,8 @@ result = await asyncio.to_thread(funcao_sincrona, arg1, arg2)
 ## Próximas etapas sugeridas
 
 - [x] Histórico de versões de artefatos por task
-- [ ] Notificações push/email ao concluir pedidos
+- [x] Notificações por e-mail ao concluir ou falhar pedidos
+- [ ] Notificações push no navegador
 - [ ] Painel de configuração de agentes (trocar modelo por task)
 - [ ] Suporte a múltiplos usuários / autenticação
 

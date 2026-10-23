@@ -473,6 +473,7 @@ export default function App() {
   const [newProjectRepo, setNewProjectRepo] = useState('')
   const [settingsAutonomy, setSettingsAutonomy] = useState('delegated')
   const [settingsBudget, setSettingsBudget] = useState('')
+  const [settingsNotificationEmail, setSettingsNotificationEmail] = useState('')
   const [composerText, setComposerText] = useState('')
   const [isConnected, setIsConnected] = useState(false)
   const [showExecDrawer, setShowExecDrawer] = useState(false)
@@ -656,6 +657,7 @@ export default function App() {
   const openSettings = (p) => {
     setSettingsAutonomy(p.autonomy || 'delegated')
     setSettingsBudget(p.budget_usd != null ? String(p.budget_usd) : '')
+    setSettingsNotificationEmail(p.notification_email || '')
     setShowSettings(true)
   }
 
@@ -664,6 +666,7 @@ export default function App() {
     const body = {
       autonomy: settingsAutonomy,
       budget_usd: settingsBudget.trim() ? parseFloat(settingsBudget) : null,
+      notification_email: settingsNotificationEmail.trim(),
     }
     const res = await fetch(`/api/projects/${project.id}`, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -780,6 +783,12 @@ export default function App() {
               {project.total_cost > 0 && (
                 <span className="rq-hint">Gasto até agora: ${Number(project.total_cost).toFixed(4)}</span>
               )}
+              <label className="rq-label">E-mail para notificações</label>
+              <input className="rq-input" type="email"
+                placeholder="voce@exemplo.com (opcional)"
+                value={settingsNotificationEmail}
+                onChange={e => setSettingsNotificationEmail(e.target.value)}/>
+              <span className="rq-hint">Avisaremos quando um pedido concluir ou falhar.</span>
               <button className="rq-btn rq-btn--primary" onClick={saveSettings}>Salvar Configurações</button>
             </div>
           </div>

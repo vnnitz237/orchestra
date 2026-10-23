@@ -39,3 +39,10 @@ async def dispatch_task(task_id: str, project_id: str) -> None:
         status = t['status'] if t else 'failed'
         if status == 'completed' or status == 'failed' and attempt >= _MAX_RETRIES:
             break
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        task = await conn.fetchrow("SELECT order_id FROM task WHERE id=$1", task_id)
+    if task:
+        from orchestra.orders import finalize_order_if_done
+        await finalize_order_if_done(str(task['order_id']), project_id)

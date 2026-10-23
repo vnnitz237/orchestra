@@ -1,5 +1,5 @@
 import asyncio, io, json, logging, os, re, zipfile
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, StreamingResponse
@@ -17,20 +17,24 @@ async def redis_relay():
     redis = aioredis.from_url(os.environ.get("REDIS_URL", "redis://localhost:6379"))
     pubsub = redis.pubsub()
     await pubsub.psubscribe("project:*")
-    async for msg in pubsub.listen():
-        if msg["type"] != "pmessage":
-            continue
-        channel = msg["channel"]
-        if isinstance(channel, bytes):
-            channel = channel.decode()
-        project_id = channel.split(":", 1)[1]
-        data = msg["data"]
-        if isinstance(data, bytes):
-            data = data.decode()
-        try:
-            await manager.broadcast_json(project_id, json.loads(data))
-        except Exception as e:
-            logger.error(f"relay error: {e}")
+    try:
+        async for msg in pubsub.listen():
+            if msg["type"] != "pmessage":
+                continue
+            channel = msg["channel"]
+            if isinstance(channel, bytes):
+                channel = channel.decode()
+            project_id = channel.split(":", 1)[1]
+            data = msg["data"]
+            if isinstance(data, bytes):
+                data = data.decode()
+            try:
+                await manager.broadcast_json(project_id, json.loads(data))
+            except Exception as e:
+                logger.error(f"relay error: {e}")
+    finally:
+        await pubsub.aclose()
+        await redis.aclose()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -50,6 +54,9 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE project ADD COLUMN IF NOT EXISTS budget_usd DECIMAL(10,2)"
         )
         await conn.execute(
+            "ALTER TABLE project ADD COLUMN IF NOT EXISTS notification_email TEXT"
+        )
+        await conn.execute(
             "ALTER TABLE artifact ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1"
         )
         await conn.execute("""
@@ -66,9 +73,24 @@ async def lifespan(app: FastAPI):
             CREATE UNIQUE INDEX IF NOT EXISTS artifact_task_path_version_idx
             ON artifact (task_id, kind, path, version)
         """)
-    asyncio.create_task(redis_relay())
-    yield
-    await close_pool()
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS notification_delivery (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                order_id UUID NOT NULL REFERENCES "order"(id) ON DELETE CASCADE,
+                channel TEXT NOT NULL, recipient TEXT NOT NULL,
+                order_status TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+                error TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), sent_at TIMESTAMPTZ,
+                UNIQUE (order_id, channel, recipient, order_status)
+            )
+        """)
+    relay_task = asyncio.create_task(redis_relay())
+    try:
+        yield
+    finally:
+        relay_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await relay_task
+        await close_pool()
 
 app = FastAPI(lifespan=lifespan, title="Orchestra API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -79,6 +101,7 @@ class ProjectCreate(BaseModel):
     github_repo: Optional[str] = None
     autonomy: Optional[str] = "delegated"
     budget_usd: Optional[float] = None
+    notification_email: Optional[str] = None
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
@@ -86,6 +109,7 @@ class ProjectUpdate(BaseModel):
     github_repo: Optional[str] = None
     autonomy: Optional[str] = None
     budget_usd: Optional[float] = None
+    notification_email: Optional[str] = None
 
 class OrderCreate(BaseModel):
     title: str
@@ -112,8 +136,9 @@ async def create_project(body: ProjectCreate):
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "INSERT INTO project (name, description, github_repo, autonomy, budget_usd) VALUES ($1,$2,$3,$4,$5) RETURNING *",
-            body.name, body.description, body.github_repo, autonomy, body.budget_usd)
+            "INSERT INTO project (name, description, github_repo, autonomy, budget_usd, notification_email) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *",
+            body.name, body.description, body.github_repo, autonomy, body.budget_usd,
+            body.notification_email)
         return dict(row)
 
 @app.patch("/api/projects/{project_id}")
@@ -128,9 +153,11 @@ async def update_project(project_id: str, body: ProjectUpdate):
         repo = body.github_repo if body.github_repo is not None else row['github_repo']
         autonomy = body.autonomy if body.autonomy in ('planning','supervised','delegated') else row['autonomy']
         budget = body.budget_usd if body.budget_usd is not None else row['budget_usd']
+        notification_email = (body.notification_email.strip() or None
+                              if body.notification_email is not None else row['notification_email'])
         updated = await conn.fetchrow(
-            "UPDATE project SET name=$1, description=$2, github_repo=$3, autonomy=$4, budget_usd=$5 WHERE id=$6 RETURNING *",
-            name, desc, repo, autonomy, budget, project_id)
+            "UPDATE project SET name=$1, description=$2, github_repo=$3, autonomy=$4, budget_usd=$5, notification_email=$6 WHERE id=$7 RETURNING *",
+            name, desc, repo, autonomy, budget, notification_email, project_id)
         return dict(updated)
 
 @app.get("/api/projects/{project_id}")
@@ -217,6 +244,10 @@ async def retry_task(task_id: str, bg: BackgroundTasks):
             if float(spent or 0) >= float(project['budget_usd']):
                 raise HTTPException(402, f"Budget limit ${project['budget_usd']} reached")
         await conn.execute("UPDATE task SET status='pending', updated_at=NOW() WHERE id=$1", task_id)
+        await conn.execute("""
+            UPDATE "order" SET status='executing', updated_at=NOW()
+            WHERE id=$1 AND status IN ('completed','failed')
+        """, str(task['order_id']))
     bg.add_task(_run_task, task_id, str(task['project_id']))
     return {"status": "retrying", "task_id": task_id}
 
@@ -271,6 +302,16 @@ async def get_order_cost(order_id: str):
             WHERE t.order_id=$1 AND e.status='completed'
         """, order_id)
         return dict(row)
+
+@app.get("/api/orders/{order_id}/notifications")
+async def get_order_notifications(order_id: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("""
+            SELECT id, channel, recipient, order_status, status, error, created_at, sent_at
+            FROM notification_delivery WHERE order_id=$1 ORDER BY created_at DESC
+        """, order_id)
+        return [dict(row) for row in rows]
 
 @app.get("/api/projects/{project_id}/artifacts")
 async def list_artifacts(project_id: str):
