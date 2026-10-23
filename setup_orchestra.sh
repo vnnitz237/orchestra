@@ -629,20 +629,40 @@ EOF
 cat > web/src/App.jsx <<'EOF'
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-const STATUS_META = {
-  pending:   { label: 'Pending',   color: '#6b7280' },
-  analyzing: { label: 'Analyzing', color: '#f59e0b' },
-  executing: { label: 'Executing', color: '#3b82f6' },
-  completed: { label: 'Completed', color: '#10b981' },
-  failed:    { label: 'Failed',    color: '#ef4444' },
-  blocked:   { label: 'Blocked',   color: '#f97316' },
+const AV_PALETTE = ['#34c759','#ff9500','#ff2d55','#007aff','#5856d6','#ff3b30','#af52de','#30b0c7','#ff6b35']
+
+function avatarColor(str = '') {
+  let h = 0
+  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h)
+  return AV_PALETTE[Math.abs(h) % AV_PALETTE.length]
 }
 
-function StatusBadge({ status }) {
+function initials(str = '') {
+  return str.split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || '?'
+}
+
+function Avatar({ name, size = 44 }) {
+  const bg = avatarColor(name)
+  return (
+    <div className="avatar" style={{ '--av-bg': bg, '--av-size': size + 'px' }}>
+      {initials(name)}
+    </div>
+  )
+}
+
+const STATUS_META = {
+  pending:   { label: 'Pending',   bg: '#f1f1f4', fg: '#6b7280' },
+  analyzing: { label: 'Analyzing', bg: '#fef3c7', fg: '#d97706' },
+  executing: { label: 'Executing', bg: '#dbeafe', fg: '#2563eb' },
+  completed: { label: 'Done',      bg: '#d1fae5', fg: '#059669' },
+  failed:    { label: 'Failed',    bg: '#fee2e2', fg: '#dc2626' },
+  blocked:   { label: 'Blocked',   bg: '#ffedd5', fg: '#ea580c' },
+}
+
+function Pill({ status }) {
   const m = STATUS_META[status] || STATUS_META.pending
   return (
-    <span className="status-badge" style={{ '--c': m.color }}>
-      <span className="status-dot" />
+    <span className="pill" style={{ '--p-bg': m.bg, '--p-fg': m.fg }}>
       {m.label}
     </span>
   )
@@ -671,17 +691,16 @@ function ArtifactModal({ artifact, onClose }) {
 }
 
 function TaskRow({ task }) {
-  const icon = task.status === 'completed' ? '✓'
-             : task.status === 'executing'  ? '⟳'
-             : task.status === 'failed'     ? '✗' : '○'
+  const statusColor = task.status === 'completed' ? '#059669' : task.status === 'executing' ? '#2563eb' : task.status === 'failed' ? '#dc2626' : '#9ca3af'
+  const icon = task.status === 'completed' ? '✓' : task.status === 'executing' ? '◌' : task.status === 'failed' ? '✗' : '○'
   return (
     <div className="task-row">
-      <div className="task-icon">{icon}</div>
+      <div className="task-icon-wrap" style={{ color: statusColor }}>{icon}</div>
       <div className="task-body">
         <div className="task-title">{task.title}</div>
         {task.description && <div className="task-desc">{task.description}</div>}
       </div>
-      <StatusBadge status={task.status} />
+      <Pill status={task.status} />
     </div>
   )
 }
@@ -689,16 +708,26 @@ function TaskRow({ task }) {
 function OrderCard({ order, tasks, expanded, onExpand }) {
   const taskList = tasks[order.id] || []
   const done = taskList.filter(t => t.status === 'completed').length
+  const agentName = 'Coordinator'
+  const preview = order.description ? order.description.slice(0, 80) + (order.description.length > 80 ? '...' : '') : ''
+  const ts = new Date(order.created_at)
+  const timeStr = isNaN(ts) ? '' : ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+
   return (
     <div className={`order-card${expanded ? ' expanded' : ''}`}>
       <div className="order-header" onClick={onExpand}>
-        <div className="order-title-row">
-          <span className="order-title">{order.title}</span>
-          <StatusBadge status={order.status} />
-        </div>
-        <div className="order-meta">
-          {taskList.length > 0 ? `${done}/${taskList.length} tasks` : ''}
-          <span className="expand-icon">{expanded ? '▲' : '▼'}</span>
+        <Avatar name={agentName} size={42} />
+        <div className="order-header-body">
+          <div className="order-header-top">
+            <span className="order-agent-name">{agentName}</span>
+            <span className="order-time">{timeStr}</span>
+          </div>
+          <div className="order-title">{order.title}</div>
+          {!expanded && preview && <div className="order-preview">{preview}</div>}
+          <div className="order-header-foot">
+            {taskList.length > 0 && <span className="order-task-count">{done}/{taskList.length} tasks</span>}
+            <Pill status={order.status} />
+          </div>
         </div>
       </div>
       {expanded && (
@@ -811,7 +840,7 @@ export default function App() {
   if (page === 'home') return (
     <div className="app">
       <header className="top-bar">
-        <div className="logo">♩ Orchestra</div>
+        <div className="logo">Orchestra</div>
         <button className="btn-primary" onClick={() => setShowNewProject(true)}>+ New Project</button>
       </header>
 
@@ -837,7 +866,7 @@ export default function App() {
       <main className="main-content">
         {projects.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">♩</div>
+            <div className="empty-icon">◎</div>
             <h2>No projects yet</h2>
             <p>Create a project and give autonomous AI agents their orders.</p>
             <button className="btn-primary" onClick={() => setShowNewProject(true)}>Create your first project</button>
@@ -846,7 +875,7 @@ export default function App() {
           <div className="project-grid">
             {projects.map(p => (
               <div key={p.id} className="project-card" onClick={() => openProject(p)}>
-                <div className="project-card-icon">♩</div>
+                <Avatar name={p.name} size={48} />
                 <div className="project-card-body">
                   <div className="project-card-name">{p.name}</div>
                   {p.description && <div className="project-card-desc">{p.description}</div>}
@@ -883,7 +912,7 @@ export default function App() {
                 onChange={e => setNewOrderTitle(e.target.value)} autoFocus />
               <textarea className="input" placeholder="Describe in detail what the agents should implement..." rows={5}
                 value={newOrderDesc} onChange={e => setNewOrderDesc(e.target.value)} />
-              <button className="btn-primary" onClick={createOrder}>Send to Coordinator →</button>
+              <button className="btn-primary" onClick={createOrder}>Send to Coordinator</button>
             </div>
           </div>
         </div>
@@ -924,17 +953,33 @@ export default function App() {
 EOF
 
 cat > web/src/App.css <<'EOF'
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
 :root {
-  --bg: #0f1117;
-  --bg2: #1a1d27;
-  --bg3: #222533;
-  --border: #2e3348;
-  --fg: #e2e8f0;
-  --fg2: #94a3b8;
-  --accent: #6366f1;
-  --accent-h: #818cf8;
-  --radius: 10px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --bg: #f2f2f7;
+  --surface: #ffffff;
+  --surface2: #f9f9fb;
+  --border: rgba(0,0,0,.08);
+  --fg: #1c1c1e;
+  --fg2: #6e6e73;
+  --accent: #5856d6;
+  --accent-h: #4340c4;
+  --radius: 14px;
+  --shadow: 0 1px 3px rgba(0,0,0,.07), 0 4px 12px rgba(0,0,0,.05);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1c1c1e; --surface: #2c2c2e; --surface2: #3a3a3c;
+    --border: rgba(255,255,255,.08); --fg: #f2f2f7; --fg2: #aeaeb2;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1c1c1e; --surface: #2c2c2e; --surface2: #3a3a3c;
+  --border: rgba(255,255,255,.08); --fg: #f2f2f7; --fg2: #aeaeb2;
   color-scheme: dark;
 }
 
@@ -944,84 +989,115 @@ body { background: var(--bg); color: var(--fg); min-height: 100vh; }
 
 .top-bar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0 24px; height: 56px;
-  background: var(--bg2); border-bottom: 1px solid var(--border);
+  padding: 0 max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  height: 60px; background: var(--surface); border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 10;
 }
-.logo { font-weight: 700; font-size: 1.1rem; letter-spacing: -0.02em; }
+.logo { font-weight: 700; font-size: 1.05rem; letter-spacing: -0.02em; color: var(--fg); }
 
-.main-content { flex: 1; padding: 24px; max-width: 1100px; margin: 0 auto; width: 100%; }
-.two-col { display: grid; grid-template-columns: 1fr 280px; gap: 24px; align-items: start; }
+.main-content {
+  flex: 1; padding: 20px max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 1100px; margin: 0 auto; width: 100%;
+}
+.two-col { display: grid; grid-template-columns: 1fr 260px; gap: 20px; align-items: start; }
 @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
 
 .btn-primary {
   background: var(--accent); color: #fff; border: none;
-  padding: 8px 16px; border-radius: 8px; font-size: 0.875rem; font-weight: 500;
-  cursor: pointer; transition: background .15s;
+  padding: 8px 18px; border-radius: 10px; font-size: 0.875rem; font-weight: 600;
+  cursor: pointer; transition: background .15s, transform .1s; font-family: inherit;
 }
-.btn-primary:hover { background: var(--accent-h); }
+.btn-primary:hover { background: var(--accent-h); transform: translateY(-1px); }
+.btn-primary:active { transform: translateY(0); }
 .btn-ghost {
   background: transparent; color: var(--fg2); border: none;
-  padding: 8px 12px; border-radius: 8px; font-size: 0.875rem; cursor: pointer;
+  padding: 8px 12px; border-radius: 10px; font-size: 0.875rem; cursor: pointer; font-family: inherit;
 }
-.btn-ghost:hover { background: var(--bg3); color: var(--fg); }
-.btn-icon { background: none; border: none; color: var(--fg2); cursor: pointer; font-size: 1rem; padding: 4px; }
-.btn-icon:hover { color: var(--fg); }
+.btn-ghost:hover { background: var(--surface2); color: var(--fg); }
+.btn-icon { background: none; border: none; color: var(--fg2); cursor: pointer; font-size: 1.1rem; padding: 4px 8px; border-radius: 6px; }
+.btn-icon:hover { background: var(--surface2); color: var(--fg); }
 
-.status-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 0.75rem; font-weight: 500; color: var(--c); white-space: nowrap; }
-.status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c); flex-shrink: 0; }
+.avatar {
+  width: var(--av-size); height: var(--av-size); border-radius: 12px;
+  background: var(--av-bg); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: calc(var(--av-size) * 0.36);
+  flex-shrink: 0; letter-spacing: -0.03em;
+}
 
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 100; }
-.modal { background: var(--bg2); border: 1px solid var(--border); border-radius: 14px; width: 540px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
-.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
-.modal-title { font-weight: 600; }
+.pill {
+  display: inline-flex; align-items: center;
+  padding: 2px 9px; border-radius: 20px;
+  background: var(--p-bg); color: var(--p-fg);
+  font-size: 0.6875rem; font-weight: 600; white-space: nowrap;
+}
+
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(4px); }
+.modal { background: var(--surface); border-radius: 18px; width: 540px; max-width: 95vw; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.18); }
+.modal-header { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--border); }
+.modal-title { font-weight: 600; font-size: 1rem; }
 .form-body { display: flex; flex-direction: column; gap: 12px; padding: 20px; }
 
-.input { background: var(--bg3); border: 1px solid var(--border); color: var(--fg); padding: 10px 12px; border-radius: 8px; font-size: 0.875rem; width: 100%; resize: vertical; font-family: inherit; }
+.input {
+  background: var(--surface2); border: 1.5px solid var(--border); color: var(--fg);
+  padding: 10px 14px; border-radius: 10px; font-size: 0.875rem; width: 100%; resize: vertical; font-family: inherit;
+  transition: border-color .15s;
+}
 .input:focus { outline: none; border-color: var(--accent); }
+.input::placeholder { color: var(--fg2); }
 
 .empty-state { text-align: center; padding: 80px 24px; color: var(--fg2); }
 .empty-state.small { padding: 32px 24px; }
-.empty-icon { font-size: 3rem; margin-bottom: 16px; }
-.empty-state h2 { font-size: 1.25rem; margin-bottom: 8px; color: var(--fg); }
+.empty-icon { font-size: 2.5rem; margin-bottom: 16px; }
+.empty-state h2 { font-size: 1.2rem; margin-bottom: 8px; color: var(--fg); font-weight: 600; }
 .empty-state p { margin-bottom: 24px; line-height: 1.6; }
 
-.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-.project-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; cursor: pointer; display: flex; gap: 14px; align-items: flex-start; transition: border-color .15s, transform .1s; }
-.project-card:hover { border-color: var(--accent); transform: translateY(-1px); }
-.project-card-icon { font-size: 1.5rem; flex-shrink: 0; }
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.project-card {
+  background: var(--surface); border-radius: var(--radius); padding: 18px; cursor: pointer;
+  display: flex; gap: 14px; align-items: flex-start;
+  box-shadow: var(--shadow); transition: transform .15s, box-shadow .15s;
+}
+.project-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.1); }
+.project-card-body { flex: 1; min-width: 0; }
 .project-card-name { font-weight: 600; margin-bottom: 4px; }
 .project-card-desc { font-size: 0.8125rem; color: var(--fg2); margin-bottom: 8px; line-height: 1.5; }
 .project-card-meta { font-size: 0.75rem; color: var(--fg2); }
 
-.orders-section { display: flex; flex-direction: column; gap: 12px; }
-.order-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.order-header { padding: 16px; cursor: pointer; user-select: none; }
-.order-header:hover { background: var(--bg3); }
-.order-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
-.order-title { font-weight: 600; font-size: 0.9375rem; }
-.order-meta { font-size: 0.75rem; color: var(--fg2); display: flex; justify-content: space-between; }
-.expand-icon { font-size: 0.625rem; color: var(--fg2); }
-.order-body { padding: 0 16px 16px; border-top: 1px solid var(--border); }
-.order-desc { font-size: 0.8125rem; color: var(--fg2); padding: 12px 0; line-height: 1.6; }
+.orders-section { display: flex; flex-direction: column; gap: 10px; }
+.order-card { background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+.order-header { padding: 14px 16px; cursor: pointer; user-select: none; display: flex; gap: 12px; align-items: flex-start; transition: background .1s; }
+.order-header:hover { background: var(--surface2); }
+.order-header-body { flex: 1; min-width: 0; }
+.order-header-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 3px; }
+.order-agent-name { font-weight: 600; font-size: 0.9rem; color: var(--fg); }
+.order-time { font-size: 0.7rem; color: var(--fg2); flex-shrink: 0; margin-left: 8px; }
+.order-title { font-size: 0.875rem; color: var(--fg); margin-bottom: 3px; line-height: 1.4; }
+.order-preview { font-size: 0.8125rem; color: var(--fg2); line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 6px; }
+.order-header-foot { display: flex; align-items: center; gap: 8px; }
+.order-task-count { font-size: 0.7rem; color: var(--fg2); }
+.order-body { padding: 0 16px 14px 70px; border-top: 1px solid var(--border); }
+.order-desc { font-size: 0.8125rem; color: var(--fg2); padding: 10px 0; line-height: 1.6; }
 .order-waiting { font-size: 0.8125rem; color: var(--fg2); padding: 8px 0; font-style: italic; }
 
-.task-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.task-row { display: flex; align-items: flex-start; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); }
 .task-row:last-child { border-bottom: none; }
-.task-icon { flex-shrink: 0; width: 20px; text-align: center; font-size: 0.875rem; color: var(--fg2); margin-top: 2px; }
+.task-icon-wrap { flex-shrink: 0; width: 18px; text-align: center; font-size: 0.8rem; margin-top: 2px; }
 .task-body { flex: 1; min-width: 0; }
-.task-title { font-size: 0.875rem; font-weight: 500; }
+.task-title { font-size: 0.8375rem; font-weight: 500; color: var(--fg); }
 .task-desc { font-size: 0.75rem; color: var(--fg2); margin-top: 2px; line-height: 1.5; }
 
-.artifacts-panel { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; position: sticky; top: 72px; }
-.panel-title { font-weight: 600; font-size: 0.75rem; margin-bottom: 12px; color: var(--fg2); text-transform: uppercase; letter-spacing: .05em; }
-.artifact-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 0.8125rem; }
-.artifact-row:hover { background: var(--bg3); }
+.artifacts-panel { background: var(--surface); border-radius: var(--radius); padding: 16px; position: sticky; top: 76px; box-shadow: var(--shadow); }
+.panel-title { font-weight: 600; font-size: 0.6875rem; margin-bottom: 10px; color: var(--fg2); text-transform: uppercase; letter-spacing: .06em; }
+.artifact-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 0.8125rem; transition: background .1s; }
+.artifact-row:hover { background: var(--surface2); }
 .artifact-icon { flex-shrink: 0; }
-.artifact-path { color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.artifact-path { color: var(--fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .artifact-row:hover .artifact-path { color: var(--fg); }
 
-.code-block { margin: 0; padding: 20px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.8125rem; color: #e2e8f0; background: #0d1117; overflow-x: auto; white-space: pre; max-height: 70vh; overflow-y: auto; line-height: 1.6; }
+.code-block { margin: 0; padding: 20px; font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace; font-size: 0.8125rem; color: var(--fg); background: var(--surface2); overflow-x: auto; white-space: pre; max-height: 70vh; overflow-y: auto; line-height: 1.6; }
 EOF
 
 # ── 9. Dockerfiles ────────────────────────────────────────────
