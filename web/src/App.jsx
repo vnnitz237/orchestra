@@ -62,6 +62,19 @@ function ArtifactModal({ artifact, onClose }) {
   )
 }
 
+const AGENT_META = {
+  architect: { label: 'Architect', color: '#0ea5e9' },
+  developer: { label: 'Developer', color: '#8b5cf6' },
+  tester:    { label: 'Tester',    color: '#f59e0b' },
+}
+
+function AgentBadge({ agentType }) {
+  const m = AGENT_META[agentType] || AGENT_META.developer
+  return (
+    <span className="agent-badge" style={{ '--ab-color': m.color }}>{m.label}</span>
+  )
+}
+
 function TaskRow({ task, onRetry }) {
   const statusColor = task.status === 'completed' ? '#059669' : task.status === 'executing' ? '#2563eb' : task.status === 'failed' ? '#dc2626' : '#9ca3af'
   const icon = task.status === 'completed' ? '✓' : task.status === 'executing' ? '◌' : task.status === 'failed' ? '✗' : '○'
@@ -72,6 +85,7 @@ function TaskRow({ task, onRetry }) {
         <div className="task-title">{task.title}</div>
         {task.description && <div className="task-desc">{task.description}</div>}
         <div className="task-meta-row">
+          <AgentBadge agentType={task.agent_type || 'developer'} />
           {task.model && <span className="task-model">{task.model.replace('claude-','').replace('-4-5','')}</span>}
           {task.cost_usd > 0 && <span className="task-cost">${Number(task.cost_usd).toFixed(4)} · {task.tokens} tokens</span>}
           {task.github_pr_url && (

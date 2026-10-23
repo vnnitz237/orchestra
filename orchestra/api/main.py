@@ -198,9 +198,9 @@ async def retry_task(task_id: str, bg: BackgroundTasks):
     return {"status": "retrying", "task_id": task_id}
 
 async def _run_task(task_id: str, project_id: str):
-    from orchestra.agents.developer import execute_task
+    from orchestra.agents.dispatch import dispatch_task
     try:
-        await execute_task(task_id, project_id)
+        await dispatch_task(task_id, project_id)
     except Exception as e:
         logger.error(f"retry task={task_id}: {e}")
 

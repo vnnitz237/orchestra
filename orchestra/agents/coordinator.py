@@ -5,24 +5,30 @@ from orchestra.github_client import read_repo_context
 
 logger = logging.getLogger(__name__)
 
-_SYSTEM = """You are a software project coordinator. Break orders into 3-5 specific, actionable development tasks.
+_SYSTEM = """You are a software project coordinator. Break orders into 3-6 specific, actionable tasks.
 
-Choose the model per task:
-- "claude-haiku-4-5"  → documentation, README, config files, simple scripts, boilerplate
-- "claude-sonnet-4-5" → APIs, core features, algorithms, database schemas, complex components
+Choose agent_type per task:
+- "architect"  → technical design docs for complex features (API specs, DB schema, architecture). Use FIRST for orders that need a clear design before coding.
+- "developer"  → implementation: APIs, features, algorithms, database code, UI components
+- "tester"     → test suites for already-implemented code. ALWAYS depends_on the developer task(s) it tests.
 
-Define task dependencies with "depends_on": list of 0-based indices of tasks this task must wait for.
-Tasks with no dependencies (empty list) run in parallel with each other.
+Choose model per task:
+- "claude-haiku-4-5"  → documentation, README, config files, boilerplate, tester tasks
+- "claude-sonnet-4-5" → APIs, core features, algorithms, complex components, architect tasks
+
+Define dependencies with "depends_on": list of 0-based indices of tasks this task must wait for.
+Tasks with no dependencies run in parallel. Tester tasks must always depend on developer tasks.
 
 Return ONLY a valid JSON array, no markdown, no explanation:
-[{"title":"...","description":"detailed description","agent_type":"developer","model":"claude-haiku-4-5|claude-sonnet-4-5","depends_on":[]}]"""
+[{"title":"...","description":"detailed description","agent_type":"architect|developer|tester","model":"claude-haiku-4-5|claude-sonnet-4-5","depends_on":[]}]"""
 
 _ALLOWED_MODELS = {"claude-haiku-4-5", "claude-sonnet-4-5"}
+_ALLOWED_AGENTS = {"architect", "developer", "tester"}
 
 
 async def _execute_dag(task_ids: list, task_deps: dict, project_id: str) -> None:
     """Execute tasks respecting depends_on; parallel where possible."""
-    from orchestra.agents.developer import execute_task
+    from orchestra.agents.dispatch import dispatch_task as execute_task
     completed: set = set()
     remaining = list(task_ids)
 
@@ -107,6 +113,9 @@ async def process_order(order_id: str) -> None:
             model = t.get('model', 'claude-sonnet-4-5')
             if model not in _ALLOWED_MODELS:
                 model = 'claude-sonnet-4-5'
+            agent_type = t.get('agent_type', 'developer')
+            if agent_type not in _ALLOWED_AGENTS:
+                agent_type = 'developer'
 
             # Validate depends_on: only allow backward references to valid indices
             raw_deps = t.get('depends_on') or []
@@ -117,7 +126,7 @@ async def process_order(order_id: str) -> None:
                 VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,$9)
             """, task_id, order_id, project_id,
                 t.get('title', 'Task'), t.get('description', ''),
-                t.get('agent_type', 'developer'), model, i,
+                agent_type, model, i,
                 json.dumps(dep_indices))  # stored as indices; resolved to IDs below
 
             await broadcast(project_id, {
@@ -125,6 +134,7 @@ async def process_order(order_id: str) -> None:
                 "task": {
                     "id": task_id, "order_id": order_id,
                     "title": t.get('title'), "description": t.get('description'),
+                    "agent_type": agent_type,
                     "status": "pending", "model": model, "sort_order": i,
                     "depends_on": dep_indices
                 }

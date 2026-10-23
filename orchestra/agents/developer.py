@@ -114,20 +114,37 @@ async def execute_task(task_id: str, project_id: str) -> None:
         try:
             dep_ids = json.loads(task.get('depends_on') or '[]')
             if dep_ids:
-                parts = []
+                spec_parts = []
+                file_parts = []
                 for dep_id in dep_ids:
                     dep = await conn.fetchrow(
-                        "SELECT title, result FROM task WHERE id=$1 AND status='completed'", dep_id)
+                        "SELECT title, result, agent_type FROM task WHERE id=$1 AND status='completed'", dep_id)
                     if not dep:
                         continue
                     try:
                         r = json.loads(dep['result'] or '{}')
-                        files_list = [a['path'] for a in r.get('artifacts', [])]
-                        parts.append(f"• {dep['title']}: created {', '.join(files_list) if files_list else 'no files'}")
+                        if dep['agent_type'] == 'architect':
+                            # Include actual spec content so developer can follow the design
+                            budget = 4000
+                            for art in r.get('artifacts', [])[:3]:
+                                row = await conn.fetchrow(
+                                    "SELECT path, content FROM artifact WHERE id=$1", art['id'])
+                                if not row or not row['content']:
+                                    continue
+                                snippet = row['content'].decode('utf-8', errors='replace')[:budget]
+                                spec_parts.append(f"### `{row['path']}`\n{snippet}")
+                                budget -= len(snippet)
+                                if budget <= 0:
+                                    break
+                        else:
+                            files_list = [a['path'] for a in r.get('artifacts', [])]
+                            file_parts.append(f"• {dep['title']}: {', '.join(files_list) if files_list else 'no files'}")
                     except Exception:
-                        parts.append(f"• {dep['title']}: completed")
-                if parts:
-                    dep_context = "\n\nFiles already created by previous tasks (do not recreate them):\n" + "\n".join(parts)
+                        file_parts.append(f"• {dep['title']}: completed")
+                if spec_parts:
+                    dep_context += "\n\nArchitecture spec to follow:\n" + "\n\n".join(spec_parts)
+                if file_parts:
+                    dep_context += "\n\nFiles already created (do not recreate):\n" + "\n".join(file_parts)
         except Exception as e:
             logger.warning(f"Could not load dep context for task={task_id}: {e}")
 
