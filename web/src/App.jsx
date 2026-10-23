@@ -474,6 +474,12 @@ export default function App() {
   const [settingsAutonomy, setSettingsAutonomy] = useState('delegated')
   const [settingsBudget, setSettingsBudget] = useState('')
   const [settingsNotificationEmail, setSettingsNotificationEmail] = useState('')
+  const [browserNotifications, setBrowserNotifications] = useState(() => {
+    try {
+      return localStorage.getItem('orchestra_browser_notifications') === 'enabled' &&
+        'Notification' in window && Notification.permission === 'granted'
+    } catch { return false }
+  })
   const [composerText, setComposerText] = useState('')
   const [isConnected, setIsConnected] = useState(false)
   const [showExecDrawer, setShowExecDrawer] = useState(false)
@@ -485,6 +491,32 @@ export default function App() {
     setToasts(prev => [...prev, { id, title, sub, kind }])
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000)
   }, [])
+
+  const showBrowserNotification = useCallback((title, body) => {
+    if (!browserNotifications || !('Notification' in window) || Notification.permission !== 'granted') return
+    try { new Notification(title, { body, tag: `orchestra-${title}-${body}` }) } catch {}
+  }, [browserNotifications])
+
+  const toggleBrowserNotifications = async () => {
+    if (!('Notification' in window)) {
+      addToast('Não disponível', 'Este navegador não oferece notificações do sistema.', 'error')
+      return
+    }
+    if (browserNotifications) {
+      setBrowserNotifications(false)
+      localStorage.setItem('orchestra_browser_notifications', 'disabled')
+      return
+    }
+    const permission = await Notification.requestPermission()
+    const enabled = permission === 'granted'
+    setBrowserNotifications(enabled)
+    localStorage.setItem('orchestra_browser_notifications', enabled ? 'enabled' : 'disabled')
+    addToast(
+      enabled ? 'Notificações ativadas' : 'Permissão não concedida',
+      enabled ? 'Você receberá avisos quando os pedidos terminarem.' : 'Altere a permissão nas configurações do navegador.',
+      enabled ? 'success' : 'error'
+    )
+  }
 
   const wsRef = useRef(null)
   const wsProjectRef = useRef(null)
@@ -550,8 +582,10 @@ export default function App() {
       const order = ordersRef.current.find(o => o.id === ev.order_id)
       if (ev.status === 'completed') {
         addToast('Pedido concluído', order?.title?.slice(0, 60), 'success')
+        showBrowserNotification('Pedido concluído', order?.title || 'O pedido terminou com sucesso.')
       } else if (ev.status === 'failed') {
         addToast('Pedido falhou', order?.title?.slice(0, 60), 'error')
+        showBrowserNotification('Pedido falhou', order?.title || 'Consulte os detalhes no Orchestra.')
       } else if (ev.status === 'awaiting_approval') {
         addToast('Aguardando aprovação', order?.title?.slice(0, 60), 'info')
       }
@@ -588,7 +622,7 @@ export default function App() {
       const now = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })
       setActivityLogs(prev => [...prev.slice(-99), { msg: ev.msg, time: now, task_id: ev.task_id }])
     }
-  }, [addToast, ordersRef])
+  }, [addToast, showBrowserNotification])
 
   const connectWs = useCallback((projectId) => {
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
@@ -789,6 +823,11 @@ export default function App() {
                 value={settingsNotificationEmail}
                 onChange={e => setSettingsNotificationEmail(e.target.value)}/>
               <span className="rq-hint">Avisaremos quando um pedido concluir ou falhar.</span>
+              <label className="rq-label">Notificações neste navegador</label>
+              <button className={`rq-btn${browserNotifications ? ' rq-btn--primary' : ''}`}
+                onClick={toggleBrowserNotifications}>
+                {browserNotifications ? '✓ Ativadas — clique para desativar' : 'Ativar notificações do navegador'}
+              </button>
               <button className="rq-btn rq-btn--primary" onClick={saveSettings}>Salvar Configurações</button>
             </div>
           </div>

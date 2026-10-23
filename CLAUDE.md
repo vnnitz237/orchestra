@@ -395,7 +395,7 @@ result = await asyncio.to_thread(funcao_sincrona, arg1, arg2)
 
 - [x] Histórico de versões de artefatos por task
 - [x] Notificações por e-mail ao concluir ou falhar pedidos
-- [ ] Notificações push no navegador
+- [x] Notificações locais do navegador via Web Notification API
 - [ ] Painel de configuração de agentes (trocar modelo por task)
 - [ ] Suporte a múltiplos usuários / autenticação
 
