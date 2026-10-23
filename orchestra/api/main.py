@@ -321,6 +321,30 @@ async def ws_endpoint(ws: WebSocket, project_id: str):
     except WebSocketDisconnect:
         manager.disconnect(ws, project_id)
 
+@app.post("/api/tasks/{task_id}/execute")
+async def execute_sandbox(task_id: str, bg: BackgroundTasks):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        task = await conn.fetchrow("SELECT * FROM task WHERE id=$1", task_id)
+        if not task:
+            raise HTTPException(404, "Task not found")
+        if task['status'] != 'completed':
+            raise HTTPException(400, "Task precisa estar concluída para executar")
+        if task['agent_type'] != 'developer':
+            raise HTTPException(400, "Apenas tasks do agente developer podem ser executadas")
+    bg.add_task(_run_sandbox, task_id, str(task['project_id']))
+    return {"status": "running", "task_id": task_id}
+
+async def _run_sandbox(task_id: str, project_id: str):
+    from orchestra.sandbox import run_task_artifacts
+    from orchestra.broadcast import broadcast
+    await broadcast(project_id, {"type": "sandbox_start", "task_id": task_id})
+    try:
+        result = await run_task_artifacts(task_id)
+    except Exception as e:
+        result = {"ok": False, "output": str(e)[:500]}
+    await broadcast(project_id, {"type": "sandbox_result", "task_id": task_id, **result})
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}

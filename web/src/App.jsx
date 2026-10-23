@@ -103,7 +103,7 @@ function ArtifactModal({ artifact, onClose }) {
 }
 
 // ─── Plan Step (task in execution panel) ─────────────────────────────────────
-function PlanStep({ task, onRetry }) {
+function PlanStep({ task, onRetry, onExecute, sandbox }) {
   const iconMap = { completed: '✓', executing: '●', failed: '✕', pending: '', analyzing: '●' }
   const icon = iconMap[task.status] || ''
   const ag = AGENTS[task.agent_type] || AGENTS.developer
@@ -126,9 +126,23 @@ function PlanStep({ task, onRetry }) {
           {task.status === 'failed' && onRetry && (
             <button className="rq-retry-btn" onClick={() => onRetry(task.id)}>↺ Tentar novamente</button>
           )}
+          {task.agent_type === 'developer' && task.status === 'completed' && onExecute && (
+            <button
+              className="rq-sandbox-run-btn"
+              onClick={() => onExecute(task.id)}
+              disabled={sandbox?.status === 'running'}
+            >
+              {sandbox?.status === 'running' ? '⏳ Executando…' : '▶ Executar'}
+            </button>
+          )}
         </div>
         {task.status === 'failed' && task.last_error && (
           <div className="rq-step-error">{task.last_error}</div>
+        )}
+        {sandbox?.status === 'done' && (
+          <div className={`rq-sandbox-terminal${sandbox.ok ? '' : ' fail'}`}>
+            {sandbox.output}
+          </div>
         )}
       </div>
       <StatusPill status={task.status}/>
@@ -137,7 +151,7 @@ function PlanStep({ task, onRetry }) {
 }
 
 // ─── Execution Panel ──────────────────────────────────────────────────────────
-function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, onRetry, onArtifactClick, isConnected }) {
+function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, onRetry, onExecute, sandboxes, onArtifactClick, isConnected }) {
   if (!order) {
     return (
       <div className="rq-exec-empty">
@@ -199,7 +213,7 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
         <div className="rq-exec-section">
           <div className="rq-section-label">Plano · {tasks.length} etapa{tasks.length !== 1 ? 's' : ''}</div>
           <div className="rq-plan-steps">
-            {tasks.map(t => <PlanStep key={t.id} task={t} onRetry={onRetry}/>)}
+            {tasks.map(t => <PlanStep key={t.id} task={t} onRetry={onRetry} onExecute={onExecute} sandbox={sandboxes?.[t.id]}/>)}
           </div>
         </div>
       )}
@@ -433,6 +447,7 @@ export default function App() {
   const [isConnected, setIsConnected] = useState(false)
   const [showExecDrawer, setShowExecDrawer] = useState(false)
   const [toasts, setToasts] = useState([])
+  const [sandboxes, setSandboxes] = useState({})
 
   const addToast = useCallback((title, sub, kind = 'info') => {
     const id = ++_toastId
@@ -534,6 +549,10 @@ export default function App() {
         }
         return next
       })
+    } else if (ev.type === 'sandbox_start') {
+      setSandboxes(prev => ({ ...prev, [ev.task_id]: { status: 'running' } }))
+    } else if (ev.type === 'sandbox_result') {
+      setSandboxes(prev => ({ ...prev, [ev.task_id]: { status: 'done', ok: ev.ok, output: ev.output } }))
     } else if (ev.type === 'activity') {
       const now = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })
       setActivityLogs(prev => [...prev.slice(-99), { msg: ev.msg, time: now, task_id: ev.task_id }])
@@ -629,6 +648,15 @@ export default function App() {
     const res = await fetch(`/api/orders/${orderId}/approve`, { method: 'POST' })
     if (res.ok) {
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'executing' } : o))
+    }
+  }
+
+  const runSandbox = async (taskId) => {
+    setSandboxes(prev => ({ ...prev, [taskId]: { status: 'running' } }))
+    const res = await fetch(`/api/tasks/${taskId}/execute`, { method: 'POST' })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      setSandboxes(prev => ({ ...prev, [taskId]: { status: 'done', ok: false, output: err.detail || 'Erro ao iniciar execução' } }))
     }
   }
 
@@ -814,6 +842,8 @@ export default function App() {
         projectId={project?.id}
         onApprove={approveOrder}
         onRetry={retryTask}
+        onExecute={runSandbox}
+        sandboxes={sandboxes}
         onArtifactClick={setSelectedArtifact}
         isConnected={isConnected}
       />
