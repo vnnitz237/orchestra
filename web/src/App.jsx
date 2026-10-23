@@ -187,6 +187,8 @@ export default function App() {
   const wsRef = useRef(null)
   const wsProjectRef = useRef(null)
   const reconnectTimer = useRef(null)
+  const projectRef = useRef(null)
+  const ordersRef = useRef([])
 
   const loadOrderCost = async (orderId) => {
     const r = await fetch(`/api/orders/${orderId}/cost`)
@@ -213,11 +215,14 @@ export default function App() {
 
   const openProject = async (p) => {
     setProject(p); setPage('project')
-    setOrders([]); setTasks({}); setCosts({}); setArtifacts({}); setExpandedOrders({}); setActivityLogs([])
+    projectRef.current = p
+    setOrders([]); setTasks({}); setCosts({}); setArtifacts([]); setExpandedOrders({}); setActivityLogs([])
     try { localStorage.setItem('orchestra_project', JSON.stringify(p)) } catch {}
     const res = await fetch(`/api/projects/${p.id}`)
     const data = await res.json()
-    setOrders(data.orders || [])
+    const freshOrders = data.orders || []
+    setOrders(freshOrders)
+    ordersRef.current = freshOrders
     for (const o of data.orders || []) {
       const tr = await fetch(`/api/orders/${o.id}/tasks`)
       const td = await tr.json()
@@ -276,36 +281,47 @@ export default function App() {
     wsRef.current = ws
   }, [handleWsMessage])
 
-  // Polling fallback: re-fetch tasks for active orders every 6s
+  // Keep refs in sync so polling closure always has fresh values
+  useEffect(() => { ordersRef.current = orders }, [orders])
+  useEffect(() => { projectRef.current = project }, [project])
+
+  // Polling fallback — stable interval, reads state via refs to avoid dep loop
   useEffect(() => {
-    if (page !== 'project' || !project) return
-    const ACTIVE = new Set(['pending', 'analyzing', 'executing'])
+    if (page !== 'project') return
+    const ACTIVE = new Set(['pending', 'analyzing', 'executing', 'awaiting_approval'])
     const poll = async () => {
-      const activeOrders = orders.filter(o => ACTIVE.has(o.status))
-      if (!activeOrders.length) return
-      for (const o of activeOrders) {
+      const proj = projectRef.current
+      if (!proj) return
+      const active = ordersRef.current.filter(o => ACTIVE.has(o.status))
+      if (!active.length) return
+
+      for (const o of active) {
         const tr = await fetch(`/api/orders/${o.id}/tasks`).catch(() => null)
-        if (!tr || !tr.ok) continue
+        if (!tr?.ok) continue
         const td = await tr.json()
-        setTasks(prev => ({
-          ...prev,
-          [o.id]: td.map(t => ({ ...t, tokens: t.tokens_used }))
-        }))
+        setTasks(prev => ({ ...prev, [o.id]: td.map(t => ({ ...t, tokens: t.tokens_used })) }))
         const cr = await fetch(`/api/orders/${o.id}/cost`).catch(() => null)
-        if (cr && cr.ok) {
-          const cd = await cr.json()
-          setCosts(prev => ({ ...prev, [o.id]: cd }))
-        }
+        if (cr?.ok) { const cd = await cr.json(); setCosts(prev => ({ ...prev, [o.id]: cd })) }
       }
-      const pr = await fetch(`/api/projects/${project.id}`).catch(() => null)
-      if (pr && pr.ok) {
-        const pd = await pr.json()
-        setOrders(pd.orders || [])
+
+      const pr = await fetch(`/api/projects/${proj.id}`).catch(() => null)
+      if (!pr?.ok) return
+      const pd = await pr.json()
+      const fresh = pd.orders || []
+      // Merge status updates instead of replacing — preserves React identity of objects
+      setOrders(prev => prev.map(o => {
+        const f = fresh.find(x => x.id === o.id)
+        return f ? { ...o, status: f.status, updated_at: f.updated_at } : o
+      }))
+      ordersRef.current = fresh
+      // Re-fetch artifacts if anything completed
+      if (fresh.some(o => o.status === 'completed')) {
+        fetch(`/api/projects/${proj.id}/artifacts`).then(r => r.json()).then(setArtifacts).catch(() => {})
       }
     }
-    const id = setInterval(poll, 6000)
+    const id = setInterval(poll, 5000)
     return () => clearInterval(id)
-  }, [page, project, orders])
+  }, [page])  // stable — never recreated while on the project page
 
   const openSettings = (p) => {
     setSettingsAutonomy(p.autonomy || 'delegated')
