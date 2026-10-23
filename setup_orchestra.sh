@@ -66,7 +66,7 @@ mkdir -p orchestra/agents orchestra/api scripts web/src/components web/public
 cat > pyproject.toml <<'EOF'
 [build-system]
 requires = ["setuptools>=68", "wheel"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "orchestra"
