@@ -124,7 +124,12 @@ body { background: var(--bg); color: var(--fg); min-height: 100vh; }
 .task-desc { font-size: 0.75rem; color: var(--fg2); margin-top: 2px; line-height: 1.5; }
 
 .artifacts-panel { background: var(--surface); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
-.panel-title { font-weight: 600; font-size: 0.6875rem; margin-bottom: 10px; color: var(--fg2); text-transform: uppercase; letter-spacing: .06em; }
+.panel-title { font-weight: 600; font-size: 0.6875rem; color: var(--fg2); text-transform: uppercase; letter-spacing: .06em; }
+.panel-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.panel-title-row .panel-title { margin-bottom: 0; }
+.btn-zip { display: inline-flex; align-items: center; gap: 4px; font-size: 0.75rem; font-weight: 600; color: var(--accent); background: transparent; border: 1px solid var(--accent); border-radius: 6px; padding: 3px 9px; text-decoration: none; cursor: pointer; transition: background .15s, color .15s; font-family: inherit; }
+.btn-zip:hover { background: var(--accent); color: #fff; }
+.order-download-row { display: flex; justify-content: flex-end; padding-top: 10px; margin-top: 6px; border-top: 1px solid var(--border); }
 .artifact-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 0.8125rem; transition: background .1s; }
 .artifact-row:hover { background: var(--surface2); }
 .artifact-icon { flex-shrink: 0; }

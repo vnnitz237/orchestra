@@ -118,6 +118,7 @@ function OrderCard({ order, tasks, costs, expanded, onExpand, onApprove, onRetry
   const ts = new Date(order.created_at)
   const timeStr = isNaN(ts) ? '' : ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
   const cost = costs[order.id]
+  const hasArtifacts = taskList.some(t => t.status === 'completed')
 
   return (
     <div className={`order-card${expanded ? ' expanded' : ''}`}>
@@ -157,6 +158,13 @@ function OrderCard({ order, tasks, costs, expanded, onExpand, onApprove, onRetry
             <p className="order-waiting">Waiting for coordinator...</p>
           )}
           {taskList.map(t => <TaskRow key={t.id} task={t} onRetry={onRetry} />)}
+          {hasArtifacts && (
+            <div className="order-download-row">
+              <a className="btn-zip" href={`/api/orders/${order.id}/artifacts/download`} download>
+                ⬇ Download ZIP
+              </a>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -534,7 +542,12 @@ export default function App() {
           <ActivityFeed logs={activityLogs} />
           {artifacts.length > 0 && (
             <div className="artifacts-panel">
-              <div className="panel-title">Generated Files</div>
+              <div className="panel-title-row">
+                <span className="panel-title">Generated Files</span>
+                <a className="btn-zip" href={`/api/projects/${project?.id}/artifacts/download`} download>
+                  ⬇ ZIP
+                </a>
+              </div>
               {artifacts.map(a => (
                 <div key={a.id} className="artifact-row" onClick={() => setSelectedArtifact(a)}>
                   <span className="artifact-icon">📄</span>

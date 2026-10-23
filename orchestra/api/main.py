@@ -1,8 +1,8 @@
-import asyncio, json, logging, os
+import asyncio, io, json, logging, os, re, zipfile
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 import redis.asyncio as aioredis
@@ -257,6 +257,45 @@ async def list_artifacts(project_id: str):
             "SELECT id, task_id, kind, path, created_at FROM artifact WHERE project_id=$1 ORDER BY created_at",
             project_id)
         return [dict(r) for r in rows]
+
+def _make_zip(rows, filename: str) -> StreamingResponse:
+    files: dict[str, bytes] = {}
+    for row in rows:
+        files[row['path']] = row['content'] or b''
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for path, content in files.items():
+            zf.writestr(path, content)
+    buf.seek(0)
+    safe = re.sub(r'[^a-z0-9._-]', '-', filename.lower()).strip('-')
+    return StreamingResponse(buf, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe}.zip"'})
+
+@app.get("/api/projects/{project_id}/artifacts/download")
+async def download_project_artifacts(project_id: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        project = await conn.fetchrow("SELECT name FROM project WHERE id=$1", project_id)
+        if not project:
+            raise HTTPException(404, "Not found")
+        rows = await conn.fetch(
+            "SELECT path, content FROM artifact WHERE project_id=$1 ORDER BY created_at",
+            project_id)
+    return _make_zip(rows, f"orchestra-{project['name']}")
+
+@app.get("/api/orders/{order_id}/artifacts/download")
+async def download_order_artifacts(order_id: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        order = await conn.fetchrow('SELECT title FROM "order" WHERE id=$1', order_id)
+        if not order:
+            raise HTTPException(404, "Not found")
+        rows = await conn.fetch("""
+            SELECT a.path, a.content FROM artifact a
+            JOIN task t ON t.id = a.task_id
+            WHERE t.order_id=$1 ORDER BY a.created_at
+        """, order_id)
+    return _make_zip(rows, f"orchestra-{order['title']}")
 
 @app.get("/api/artifacts/{artifact_id}/content")
 async def get_artifact_content(artifact_id: str):
