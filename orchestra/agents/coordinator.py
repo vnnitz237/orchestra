@@ -1,23 +1,47 @@
-import anthropic, json, os, uuid, logging, re
+import anthropic, asyncio, json, os, uuid, logging, re
 from orchestra.db import get_pool
 from orchestra.broadcast import broadcast
 from orchestra.github_client import read_repo_context
 
 logger = logging.getLogger(__name__)
 
-# Model routing rules (coordinator decides per task)
-# haiku  → docs, configs, simple scripts, tests for trivial components
-# sonnet → APIs, features, algorithms, DB schemas, complex components
 _SYSTEM = """You are a software project coordinator. Break orders into 3-5 specific, actionable development tasks.
 
-For each task also choose the most cost-effective model:
+Choose the model per task:
 - "claude-haiku-4-5"  → documentation, README, config files, simple scripts, boilerplate
 - "claude-sonnet-4-5" → APIs, core features, algorithms, database schemas, complex components
 
+Define task dependencies with "depends_on": list of 0-based indices of tasks this task must wait for.
+Tasks with no dependencies (empty list) run in parallel with each other.
+
 Return ONLY a valid JSON array, no markdown, no explanation:
-[{"title":"...","description":"detailed description","agent_type":"developer","model":"claude-haiku-4-5|claude-sonnet-4-5"}]"""
+[{"title":"...","description":"detailed description","agent_type":"developer","model":"claude-haiku-4-5|claude-sonnet-4-5","depends_on":[]}]"""
 
 _ALLOWED_MODELS = {"claude-haiku-4-5", "claude-sonnet-4-5"}
+
+
+async def _execute_dag(task_ids: list, task_deps: dict, project_id: str) -> None:
+    """Execute tasks respecting depends_on; parallel where possible."""
+    from orchestra.agents.developer import execute_task
+    completed: set = set()
+    remaining = list(task_ids)
+
+    while remaining:
+        wave = [tid for tid in remaining if all(d in completed for d in task_deps.get(tid, []))]
+        if not wave:
+            logger.error("DAG has circular/unresolvable deps — running remaining sequentially")
+            wave = remaining[:1]
+
+        if len(wave) > 1:
+            logger.info(f"Running {len(wave)} tasks in parallel: {wave}")
+            await asyncio.gather(*[execute_task(tid, project_id) for tid in wave])
+        else:
+            await execute_task(wave[0], project_id)
+
+        for tid in wave:
+            completed.add(tid)
+            remaining.remove(tid)
+
 
 async def process_order(order_id: str) -> None:
     pool = await get_pool()
@@ -40,7 +64,6 @@ async def process_order(order_id: str) -> None:
             logger.info(f"Read GitHub context for {github_repo}: {len(repo_context)} chars")
 
         client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-
         repo_section = f"\n\nRepository context:\n{repo_context}" if repo_context else ""
         user_prompt = (
             f"Order: {order['title']}\n"
@@ -48,8 +71,6 @@ async def process_order(order_id: str) -> None:
         )
 
         try:
-            # Haiku: ~20x cheaper than Opus for JSON planning
-            # Prompt caching on system prompt saves 90% after first call
             msg = client.messages.create(
                 model="claude-haiku-4-5",
                 max_tokens=1024,
@@ -66,7 +87,6 @@ async def process_order(order_id: str) -> None:
             cost = (tokens_in * 0.25 + tokens_out * 1.25) / 1_000_000
             logger.info(f"Coordinator: {tokens_in}in/{tokens_out}out, ${cost:.5f}")
 
-            # Log model distribution chosen
             model_dist = {}
             for t in tasks:
                 m = t.get('model', 'claude-sonnet-4-5')
@@ -84,27 +104,45 @@ async def process_order(order_id: str) -> None:
         task_ids = []
         for i, t in enumerate(tasks):
             task_id = str(uuid.uuid4())
-            # Validate model — fall back to sonnet if coordinator hallucinated a name
             model = t.get('model', 'claude-sonnet-4-5')
             if model not in _ALLOWED_MODELS:
                 model = 'claude-sonnet-4-5'
 
+            # Validate depends_on: only allow backward references to valid indices
+            raw_deps = t.get('depends_on') or []
+            dep_indices = [j for j in raw_deps if isinstance(j, int) and 0 <= j < i]
+
             await conn.execute("""
-                INSERT INTO task (id, order_id, project_id, title, description, agent_type, model, status, sort_order)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8)
+                INSERT INTO task (id, order_id, project_id, title, description, agent_type, model, status, sort_order, depends_on)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8,$9)
             """, task_id, order_id, project_id,
                 t.get('title', 'Task'), t.get('description', ''),
-                t.get('agent_type', 'developer'), model, i)
+                t.get('agent_type', 'developer'), model, i,
+                json.dumps(dep_indices))  # stored as indices; resolved to IDs below
 
             await broadcast(project_id, {
                 "type": "task_created",
                 "task": {
                     "id": task_id, "order_id": order_id,
                     "title": t.get('title'), "description": t.get('description'),
-                    "status": "pending", "model": model, "sort_order": i
+                    "status": "pending", "model": model, "sort_order": i,
+                    "depends_on": dep_indices
                 }
             })
             task_ids.append(task_id)
+
+        # Resolve index-based depends_on to actual task UUIDs
+        task_deps: dict = {}
+        for i, task_id in enumerate(task_ids):
+            raw_deps = tasks[i].get('depends_on') or []
+            dep_ids = [task_ids[j] for j in raw_deps if isinstance(j, int) and 0 <= j < i]
+            task_deps[task_id] = dep_ids
+            await conn.execute(
+                "UPDATE task SET depends_on=$1 WHERE id=$2",
+                json.dumps(dep_ids), task_id)
+
+        parallel_count = sum(1 for deps in task_deps.values() if not deps)
+        logger.info(f"DAG: {len(task_ids)} tasks, {parallel_count} can start immediately")
 
         autonomy = project['autonomy'] if project else 'delegated'
         if autonomy == 'planning':
@@ -120,6 +158,4 @@ async def process_order(order_id: str) -> None:
             'executing', order_id)
         await broadcast(project_id, {"type": "order_updated", "order_id": order_id, "status": "executing"})
 
-    from orchestra.agents.developer import execute_task
-    for task_id in task_ids:
-        await execute_task(task_id, project_id)
+    await _execute_dag(task_ids, task_deps, project_id)

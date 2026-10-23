@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS task (
     github_pr_url  TEXT,
     model          TEXT NOT NULL DEFAULT 'claude-sonnet-4-5',
     sort_order     INTEGER NOT NULL DEFAULT 0,
+    depends_on     JSONB NOT NULL DEFAULT '[]',
     created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

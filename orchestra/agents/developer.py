@@ -84,12 +84,35 @@ async def execute_task(task_id: str, project_id: str) -> None:
         order_title = order['title'] if order else ""
         order_id = str(task['order_id'])
 
+        # Build context from completed dependency tasks
+        dep_context = ""
+        try:
+            dep_ids = json.loads(task.get('depends_on') or '[]')
+            if dep_ids:
+                parts = []
+                for dep_id in dep_ids:
+                    dep = await conn.fetchrow(
+                        "SELECT title, result FROM task WHERE id=$1 AND status='completed'", dep_id)
+                    if not dep:
+                        continue
+                    try:
+                        r = json.loads(dep['result'] or '{}')
+                        files = [a['path'] for a in r.get('artifacts', [])]
+                        parts.append(f"• {dep['title']}: created {', '.join(files) if files else 'no files'}")
+                    except Exception:
+                        parts.append(f"• {dep['title']}: completed")
+                if parts:
+                    dep_context = "\n\nFiles already created by previous tasks (do not recreate them):\n" + "\n".join(parts)
+        except Exception as e:
+            logger.warning(f"Could not load dep context for task={task_id}: {e}")
+
         repo_hint = f" (GitHub: {github_repo})" if github_repo else ""
         user_prompt = (
             f"Project: {project_name}{repo_hint}\n"
             f"Order: {order_title}\n"
             f"Task: {task['title']}\n"
             f"Details: {task['description']}"
+            f"{dep_context}"
         )
 
         response_chunks = []

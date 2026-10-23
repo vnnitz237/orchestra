@@ -41,6 +41,9 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE task ADD COLUMN IF NOT EXISTS model TEXT NOT NULL DEFAULT 'claude-sonnet-4-5'"
         )
         await conn.execute(
+            "ALTER TABLE task ADD COLUMN IF NOT EXISTS depends_on JSONB NOT NULL DEFAULT '[]'"
+        )
+        await conn.execute(
             "ALTER TABLE project ADD COLUMN IF NOT EXISTS autonomy TEXT NOT NULL DEFAULT 'delegated'"
         )
         await conn.execute(
@@ -212,24 +215,25 @@ async def approve_order(order_id: str, bg: BackgroundTasks):
         if order['status'] != 'awaiting_approval':
             raise HTTPException(400, f"Order status is '{order['status']}', expected 'awaiting_approval'")
         tasks = await conn.fetch(
-            "SELECT id FROM task WHERE order_id=$1 AND status='pending' ORDER BY sort_order", order_id)
+            "SELECT id, depends_on FROM task WHERE order_id=$1 AND status='pending' ORDER BY sort_order", order_id)
         await conn.execute(
             'UPDATE "order" SET status=\'executing\', updated_at=NOW() WHERE id=$1', order_id)
+        import json as _json
         task_ids = [str(t['id']) for t in tasks]
+        task_deps = {str(t['id']): _json.loads(t['depends_on'] or '[]') for t in tasks}
         project_id = str(order['project_id'])
 
     from orchestra.broadcast import broadcast
     await broadcast(project_id, {"type": "order_updated", "order_id": order_id, "status": "executing"})
-    bg.add_task(_run_approved_tasks, task_ids, project_id)
+    bg.add_task(_run_approved_tasks, task_ids, task_deps, project_id)
     return {"status": "approved", "tasks": len(task_ids)}
 
-async def _run_approved_tasks(task_ids: list, project_id: str):
-    from orchestra.agents.developer import execute_task
-    for task_id in task_ids:
-        try:
-            await execute_task(task_id, project_id)
-        except Exception as e:
-            logger.error(f"approved task={task_id}: {e}")
+async def _run_approved_tasks(task_ids: list, task_deps: dict, project_id: str):
+    from orchestra.agents.coordinator import _execute_dag
+    try:
+        await _execute_dag(task_ids, task_deps, project_id)
+    except Exception as e:
+        logger.error(f"approved tasks project={project_id}: {e}")
 
 @app.get("/api/orders/{order_id}/cost")
 async def get_order_cost(order_id: str):
