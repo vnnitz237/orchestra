@@ -56,8 +56,9 @@ fi
 if [ ! -f "$ROOT_DIR/.env" ]; then
 cat > "$ROOT_DIR/.env" <<'EOF'
 ANTHROPIC_API_KEY=sk-ant-YOUR_KEY_HERE
+GITHUB_TOKEN=ghp_YOUR_GITHUB_TOKEN_HERE
 EOF
-  warn ".env created – fill in your ANTHROPIC_API_KEY before running Docker"
+  warn ".env created – fill in ANTHROPIC_API_KEY and GITHUB_TOKEN before running Docker"
 fi
 
 mkdir -p orchestra/agents orchestra/api scripts web/src/components web/public
@@ -82,6 +83,7 @@ dependencies = [
     "httpx>=0.27",
     "anthropic>=0.25",
     "structlog>=24.1",
+    "PyGithub>=2.1",
 ]
 
 [tool.setuptools.packages.find]
@@ -97,6 +99,7 @@ CREATE TABLE IF NOT EXISTS project (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name        TEXT NOT NULL,
     description TEXT,
+    github_repo TEXT,
     status      TEXT NOT NULL DEFAULT 'active',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -112,17 +115,18 @@ CREATE TABLE IF NOT EXISTS "order" (
 );
 
 CREATE TABLE IF NOT EXISTS task (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    order_id    UUID NOT NULL REFERENCES "order"(id) ON DELETE CASCADE,
-    project_id  UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE,
-    title       TEXT NOT NULL,
-    description TEXT,
-    agent_type  TEXT NOT NULL DEFAULT 'developer',
-    status      TEXT NOT NULL DEFAULT 'pending',
-    result      TEXT,
-    sort_order  INTEGER NOT NULL DEFAULT 0,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id       UUID NOT NULL REFERENCES "order"(id) ON DELETE CASCADE,
+    project_id     UUID NOT NULL REFERENCES project(id) ON DELETE CASCADE,
+    title          TEXT NOT NULL,
+    description    TEXT,
+    agent_type     TEXT NOT NULL DEFAULT 'developer',
+    status         TEXT NOT NULL DEFAULT 'pending',
+    result         TEXT,
+    github_pr_url  TEXT,
+    sort_order     INTEGER NOT NULL DEFAULT 0,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS execution (
@@ -227,11 +231,90 @@ class ConnectionManager:
 manager = ConnectionManager()
 EOF
 
-# ── 5. Coordinator agent ──────────────────────────────────────
+# ── 5. GitHub client ─────────────────────────────────────────
+cat > orchestra/github_client.py <<'EOF'
+import os
+import re
+import logging
+from github import Github, GithubException
+
+logger = logging.getLogger(__name__)
+
+def _get_gh():
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token or token.startswith("ghp_YOUR"):
+        return None
+    return Github(token)
+
+def slug(text: str) -> str:
+    return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')[:40]
+
+def read_repo_context(github_repo: str, max_chars: int = 3000) -> str:
+    gh = _get_gh()
+    if not gh or not github_repo:
+        return ""
+    try:
+        repo = gh.get_repo(github_repo)
+        contents = repo.get_contents("")
+        file_list = []
+        for c in sorted(contents, key=lambda x: (x.type != 'dir', x.path)):
+            icon = "DIR" if c.type == "dir" else "FILE"
+            file_list.append(f"  {icon}  {c.path}")
+            if len(file_list) >= 40:
+                break
+
+        readme_text = ""
+        try:
+            readme = repo.get_readme()
+            readme_text = readme.decoded_content.decode('utf-8', errors='replace')[:1500]
+        except Exception:
+            pass
+
+        ctx = f"GitHub Repository: {github_repo}\n\nFile structure:\n" + "\n".join(file_list)
+        if readme_text:
+            ctx += f"\n\nREADME (first 1500 chars):\n{readme_text}"
+        return ctx[:max_chars]
+    except Exception as e:
+        logger.warning(f"read_repo_context {github_repo}: {e}")
+        return f"(Could not read repo {github_repo}: {e})"
+
+def create_pr(github_repo: str, branch_name: str, title: str, body: str, files: list) -> str:
+    """
+    Create branch, commit files, open PR. Returns PR HTML URL.
+    files: list of {"path": str, "content": str}
+    """
+    gh = _get_gh()
+    if not gh:
+        raise ValueError("GITHUB_TOKEN not configured or invalid")
+
+    repo = gh.get_repo(github_repo)
+    default_branch = repo.default_branch
+    base_sha = repo.get_branch(default_branch).commit.sha
+
+    try:
+        repo.create_git_ref(f"refs/heads/{branch_name}", base_sha)
+    except GithubException as e:
+        if e.status != 422:
+            raise
+
+    for f in files:
+        path, content = f["path"], f["content"]
+        try:
+            existing = repo.get_contents(path, ref=branch_name)
+            repo.update_file(path, f"orchestra: {title}", content, existing.sha, branch=branch_name)
+        except GithubException:
+            repo.create_file(path, f"orchestra: {title}", content, branch=branch_name)
+
+    pr = repo.create_pull(title=title, body=body, head=branch_name, base=default_branch)
+    return pr.html_url
+EOF
+
+# ── 6. Coordinator agent ──────────────────────────────────────
 cat > orchestra/agents/coordinator.py <<'EOF'
 import anthropic, json, os, uuid, logging, re
 from orchestra.db import get_pool
 from orchestra.broadcast import broadcast
+from orchestra.github_client import read_repo_context
 
 logger = logging.getLogger(__name__)
 
@@ -242,18 +325,26 @@ async def process_order(order_id: str) -> None:
         if not order:
             return
         project_id = str(order['project_id'])
+        project = await conn.fetchrow("SELECT * FROM project WHERE id=$1", project_id)
 
         await conn.execute(
             'UPDATE "order" SET status=$1, updated_at=NOW() WHERE id=$2',
             'analyzing', order_id)
         await broadcast(project_id, {"type": "order_updated", "order_id": order_id, "status": "analyzing"})
 
+        github_repo = project['github_repo'] if project else None
+        repo_context = ""
+        if github_repo:
+            repo_context = read_repo_context(github_repo)
+            logger.info(f"Read GitHub context for {github_repo}: {len(repo_context)} chars")
+
         client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
+        repo_section = f"\n\nRepository context:\n{repo_context}" if repo_context else ""
         prompt = f"""You are a software project coordinator. Break this order into 3-5 specific, actionable development tasks.
 
 Order: {order['title']}
-Description: {order['description']}
+Description: {order['description']}{repo_section}
 
 Return ONLY a JSON array (no markdown, no explanation):
 [{{"title": "...", "description": "detailed description of what to implement", "agent_type": "developer"}}]"""
@@ -305,6 +396,7 @@ cat > orchestra/agents/developer.py <<'EOF'
 import anthropic, json, os, re, uuid, logging
 from orchestra.db import get_pool
 from orchestra.broadcast import broadcast
+from orchestra.github_client import create_pr, slug
 
 logger = logging.getLogger(__name__)
 
@@ -331,6 +423,7 @@ async def execute_task(task_id: str, project_id: str) -> None:
         if not task:
             return
         order = await conn.fetchrow('SELECT * FROM "order" WHERE id=$1', task['order_id'])
+        project = await conn.fetchrow("SELECT * FROM project WHERE id=$1", project_id)
 
         await conn.execute("UPDATE task SET status='executing', updated_at=NOW() WHERE id=$1", task_id)
         await broadcast(project_id, {"type": "task_updated", "task_id": task_id, "status": "executing"})
@@ -343,10 +436,16 @@ async def execute_task(task_id: str, project_id: str) -> None:
             json.dumps({"title": task['title'], "description": task['description']}))
 
         client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-        context = order['title'] if order else "Software project"
+        project_name = project['name'] if project else "Software project"
+        github_repo = project['github_repo'] if project else None
+        order_title = order['title'] if order else ""
+        order_id = str(task['order_id'])
+
+        repo_hint = f" (GitHub: {github_repo})" if github_repo else ""
         prompt = f"""You are an expert software developer. Implement this task completely.
 
-Project: {context}
+Project: {project_name}{repo_hint}
+Order: {order_title}
 Task: {task['title']}
 Details: {task['description']}
 
@@ -388,12 +487,29 @@ Generate complete, working, production-quality code with error handling."""
             WHERE id=$4
         """, response_text[:8000], cost, tokens_in + tokens_out, exec_id)
 
-        result = json.dumps({"artifacts": artifact_ids, "files": len(files)})
-        await conn.execute("UPDATE task SET status='completed', result=$1, updated_at=NOW() WHERE id=$2",
-                           result, task_id)
+        pr_url = None
+        if github_repo and files:
+            try:
+                branch_name = f"orchestra/{order_id[:8]}/{slug(task['title'])}"
+                pr_body = (
+                    f"Generated by Orchestra\n\n"
+                    f"**Order:** {order_title}\n"
+                    f"**Task:** {task['title']}\n\n"
+                    f"{task['description'] or ''}"
+                )
+                pr_url = create_pr(github_repo, branch_name, task['title'], pr_body, files)
+                logger.info(f"PR created: {pr_url}")
+            except Exception as pr_err:
+                logger.warning(f"PR creation failed for task={task_id}: {pr_err}")
+
+        result = json.dumps({"artifacts": artifact_ids, "files": len(files), "pr_url": pr_url})
+        await conn.execute(
+            "UPDATE task SET status='completed', result=$1, github_pr_url=$2, updated_at=NOW() WHERE id=$3",
+            result, pr_url, task_id)
         await broadcast(project_id, {
             "type": "task_updated", "task_id": task_id,
-            "status": "completed", "artifacts": artifact_ids
+            "status": "completed", "artifacts": artifact_ids,
+            "github_pr_url": pr_url
         })
 
     pool = await get_pool()
@@ -465,6 +581,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 class ProjectCreate(BaseModel):
     name: str
     description: Optional[str] = None
+    github_repo: Optional[str] = None
 
 class OrderCreate(BaseModel):
     title: str
@@ -487,8 +604,8 @@ async def create_project(body: ProjectCreate):
     pool = await get_pool()
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "INSERT INTO project (name, description) VALUES ($1,$2) RETURNING *",
-            body.name, body.description)
+            "INSERT INTO project (name, description, github_repo) VALUES ($1,$2,$3) RETURNING *",
+            body.name, body.description, body.github_repo)
         return dict(row)
 
 @app.get("/api/projects/{project_id}")
@@ -527,7 +644,9 @@ async def _run_coordinator(order_id: str):
 async def get_tasks(order_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch("SELECT * FROM task WHERE order_id=$1 ORDER BY sort_order", order_id)
+        rows = await conn.fetch(
+            "SELECT id, order_id, project_id, title, description, agent_type, status, result, github_pr_url, sort_order, created_at, updated_at FROM task WHERE order_id=$1 ORDER BY sort_order",
+            order_id)
         return [dict(r) for r in rows]
 
 @app.get("/api/projects/{project_id}/artifacts")
@@ -699,6 +818,11 @@ function TaskRow({ task }) {
       <div className="task-body">
         <div className="task-title">{task.title}</div>
         {task.description && <div className="task-desc">{task.description}</div>}
+        {task.github_pr_url && (
+          <a className="pr-link" href={task.github_pr_url} target="_blank" rel="noreferrer">
+            View PR on GitHub
+          </a>
+        )}
       </div>
       <Pill status={task.status} />
     </div>
@@ -756,6 +880,7 @@ export default function App() {
   const [showNewOrder, setShowNewOrder] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectDesc, setNewProjectDesc] = useState('')
+  const [newProjectRepo, setNewProjectRepo] = useState('')
   const [newOrderTitle, setNewOrderTitle] = useState('')
   const [newOrderDesc, setNewOrderDesc] = useState('')
   const wsRef = useRef(null)
@@ -804,7 +929,9 @@ export default function App() {
         setTasks(prev => {
           const next = {}
           for (const [k, v] of Object.entries(prev)) {
-            next[k] = v.map(t => t.id === ev.task_id ? { ...t, status: ev.status } : t)
+            next[k] = v.map(t => t.id === ev.task_id
+              ? { ...t, status: ev.status, github_pr_url: ev.github_pr_url || t.github_pr_url }
+              : t)
           }
           return next
         })
@@ -817,11 +944,11 @@ export default function App() {
     if (!newProjectName.trim()) return
     const res = await fetch('/api/projects', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: newProjectName, description: newProjectDesc })
+      body: JSON.stringify({ name: newProjectName, description: newProjectDesc, github_repo: newProjectRepo.trim() || null })
     })
     const p = await res.json()
     setProjects(prev => [p, ...prev])
-    setNewProjectName(''); setNewProjectDesc(''); setShowNewProject(false)
+    setNewProjectName(''); setNewProjectDesc(''); setNewProjectRepo(''); setShowNewProject(false)
   }
 
   const createOrder = async () => {
@@ -853,10 +980,12 @@ export default function App() {
             </div>
             <div className="form-body">
               <input className="input" placeholder="Project name" value={newProjectName}
-                onChange={e => setNewProjectName(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && createProject()} autoFocus />
-              <textarea className="input" placeholder="Description (optional)" rows={3}
+                onChange={e => setNewProjectName(e.target.value)} autoFocus />
+              <textarea className="input" placeholder="Description (optional)" rows={2}
                 value={newProjectDesc} onChange={e => setNewProjectDesc(e.target.value)} />
+              <input className="input" placeholder="GitHub repo (optional) — e.g. owner/repo" value={newProjectRepo}
+                onChange={e => setNewProjectRepo(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && createProject()} />
               <button className="btn-primary" onClick={createProject}>Create Project</button>
             </div>
           </div>
@@ -878,6 +1007,7 @@ export default function App() {
                 <Avatar name={p.name} size={48} />
                 <div className="project-card-body">
                   <div className="project-card-name">{p.name}</div>
+                  {p.github_repo && <div className="project-card-repo">{p.github_repo}</div>}
                   {p.description && <div className="project-card-desc">{p.description}</div>}
                   <div className="project-card-meta">{p.order_count || 0} orders</div>
                 </div>
@@ -1051,8 +1181,9 @@ body { background: var(--bg); color: var(--fg); min-height: 100vh; }
 .project-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,.1); }
 .project-card-body { flex: 1; min-width: 0; }
 .project-card-name { font-weight: 600; margin-bottom: 4px; }
-.project-card-desc { font-size: 0.8125rem; color: var(--fg2); margin-bottom: 8px; line-height: 1.5; }
+.project-card-desc { font-size: 0.8125rem; color: var(--fg2); margin-bottom: 6px; line-height: 1.5; }
 .project-card-meta { font-size: 0.75rem; color: var(--fg2); }
+.project-card-repo { font-size: 0.72rem; color: var(--accent); margin-bottom: 4px; font-family: ui-monospace, monospace; }
 
 .orders-section { display: flex; flex-direction: column; gap: 10px; }
 .order-card { background: var(--surface); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
@@ -1086,6 +1217,9 @@ body { background: var(--bg); color: var(--fg); min-height: 100vh; }
 .artifact-row:hover .artifact-path { color: var(--fg); }
 
 .code-block { margin: 0; padding: 20px; font-family: 'SF Mono', 'Fira Code', ui-monospace, monospace; font-size: 0.8125rem; color: var(--fg); background: var(--surface2); overflow-x: auto; white-space: pre; max-height: 70vh; overflow-y: auto; line-height: 1.6; }
+
+.pr-link { display: inline-flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 0.75rem; color: var(--accent); text-decoration: none; font-weight: 500; }
+.pr-link:hover { text-decoration: underline; }
 EOF
 
 # ── 9. Dockerfiles ────────────────────────────────────────────
