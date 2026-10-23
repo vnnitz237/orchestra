@@ -81,8 +81,16 @@ async def execute_task(task_id: str, project_id: str) -> None:
                 system=[{"type": "text", "text": _SYSTEM, "cache_control": {"type": "ephemeral"}}],
                 messages=[{"role": "user", "content": prompt}]
             ) as stream:
+                char_buf = ""
                 async for delta in stream.text_stream:
                     chunks.append(delta)
+                    char_buf += delta
+                    if len(char_buf) >= 120:
+                        preview = char_buf.replace('\n', ' ').strip()[:80]
+                        if preview:
+                            await broadcast(project_id, {"type": "activity", "task_id": task_id,
+                                "msg": f"Designing spec: {preview}…"})
+                        char_buf = ""
                 final = await stream.get_final_message()
                 tokens_in = final.usage.input_tokens
                 tokens_out = final.usage.output_tokens

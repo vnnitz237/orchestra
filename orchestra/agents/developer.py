@@ -1,4 +1,4 @@
-import anthropic, json, os, re, uuid, logging
+import anthropic, asyncio, json, os, re, uuid, logging
 from orchestra.db import get_pool
 from orchestra.broadcast import broadcast
 from orchestra.github_client import create_pr, slug
@@ -269,7 +269,7 @@ async def execute_task(task_id: str, project_id: str) -> None:
                     f"**Task:** {task['title']}\n\n"
                     f"{task['description'] or ''}"
                 )
-                pr_url = create_pr(github_repo, branch_name, task['title'], pr_body, files)
+                pr_url = await asyncio.to_thread(create_pr, github_repo, branch_name, task['title'], pr_body, files)
                 logger.info(f"PR created: {pr_url}")
             except Exception as pr_err:
                 logger.warning(f"PR creation failed for task={task_id}: {pr_err}")

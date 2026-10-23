@@ -1,7 +1,7 @@
 import anthropic, asyncio, json, os, uuid, logging, re
 from orchestra.db import get_pool
 from orchestra.broadcast import broadcast
-from orchestra.github_client import read_repo_context
+from orchestra.github_client import read_repo_context as _read_repo_context_sync
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +66,10 @@ async def process_order(order_id: str) -> None:
         github_repo = project['github_repo'] if project else None
         repo_context = ""
         if github_repo:
-            repo_context = read_repo_context(github_repo)
+            repo_context = await asyncio.to_thread(_read_repo_context_sync, github_repo)
             logger.info(f"Read GitHub context for {github_repo}: {len(repo_context)} chars")
 
-        client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
         repo_section = f"\n\nRepository context:\n{repo_context}" if repo_context else ""
         user_prompt = (
             f"Order: {order['title']}\n"
@@ -77,7 +77,7 @@ async def process_order(order_id: str) -> None:
         )
 
         try:
-            msg = client.messages.create(
+            msg = await client.messages.create(
                 model="claude-haiku-4-5",
                 max_tokens=1024,
                 system=[{"type": "text", "text": _SYSTEM, "cache_control": {"type": "ephemeral"}}],
