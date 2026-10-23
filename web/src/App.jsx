@@ -1,191 +1,369 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-const AV_PALETTE = ['#34c759','#ff9500','#ff2d55','#007aff','#5856d6','#ff3b30','#af52de','#30b0c7','#ff6b35']
-
-function avatarColor(str = '') {
-  let h = 0
-  for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h)
-  return AV_PALETTE[Math.abs(h) % AV_PALETTE.length]
+// ─── Agent Definitions ────────────────────────────────────────────────────────
+const AGENTS = {
+  coordinator: { name: 'Atlas', role: 'Coordinator', color: '#2563EB' },
+  architect:   { name: 'Lia',   role: 'Architect',   color: '#7C3AED' },
+  developer:   { name: 'Tec',   role: 'Developer',   color: '#00B978' },
+  tester:      { name: 'Finn',  role: 'Tester',      color: '#F59E0B' },
 }
 
-function initials(str = '') {
-  return str.split(' ').slice(0, 2).map(w => w[0] || '').join('').toUpperCase() || '?'
+const AV_COLORS = ['#2563EB','#00B978','#F59E0B','#7C3AED','#e11d48','#0891b2','#ea580c','#16a34a']
+function avatarColor(s=''){let h=0;for(let i=0;i<s.length;i++)h=s.charCodeAt(i)+((h<<5)-h);return AV_COLORS[Math.abs(h)%AV_COLORS.length]}
+function initials(s=''){return s.split(' ').slice(0,2).map(w=>w[0]||'').join('').toUpperCase()||'?'}
+
+// ─── Agent SVG Avatars ────────────────────────────────────────────────────────
+function AgentAvatar({ type = 'coordinator', size = 32 }) {
+  const ag = AGENTS[type] || AGENTS.coordinator
+  const c = ag.color
+  // All shapes use viewBox="0 0 40 40" with two capsule eyes
+  const eyesY = type === 'architect' ? 24 : 18
+  return (
+    <svg viewBox="0 0 40 40" width={size} height={size} aria-label={ag.name} style={{ flexShrink: 0 }}>
+      {type === 'coordinator' && (
+        <path d="M20 4 C21 10 18 14 22 17 C27 19 36 18 36 20 C36 22 27 21 22 23 C18 26 21 30 20 36 C19 30 22 26 18 23 C13 21 4 22 4 20 C4 18 13 19 18 17 C22 14 19 10 20 4Z" fill={c}/>
+      )}
+      {type === 'architect' && (
+        <path d="M20 5 L35 33 Q35 36 31 36 L9 36 Q5 36 5 33Z" fill={c}/>
+      )}
+      {type === 'developer' && (
+        <path d="M13 7 C7 9 4 16 5 22 C6 29 11 35 18 36 C25 37 33 31 35 24 C37 17 33 9 27 7 C21 5 16 6 13 7Z" fill={c}/>
+      )}
+      {type === 'tester' && (
+        <path d="M20 5 L32 12 L32 28 L20 35 L8 28 L8 12Z" fill={c}/>
+      )}
+      <rect x="12.5" y={eyesY} width="5" height="8" rx="2.5" fill="white"/>
+      <rect x="22.5" y={eyesY} width="5" height="8" rx="2.5" fill="white"/>
+    </svg>
+  )
 }
 
-function Avatar({ name, size = 44 }) {
+// Fallback initials avatar for project cards
+function InitialsAvatar({ name, size = 44 }) {
   const bg = avatarColor(name)
   return (
-    <div className="avatar" style={{ '--av-bg': bg, '--av-size': size + 'px' }}>
+    <div className="rq-project-avatar" style={{ background: bg, width: size, height: size }}>
       {initials(name)}
     </div>
   )
 }
 
-const STATUS_META = {
-  pending:           { label: 'Pending',           bg: '#f1f1f4', fg: '#6b7280' },
-  analyzing:         { label: 'Analyzing',         bg: '#fef3c7', fg: '#d97706' },
-  executing:         { label: 'Executing',         bg: '#dbeafe', fg: '#2563eb' },
-  completed:         { label: 'Done',              bg: '#d1fae5', fg: '#059669' },
-  failed:            { label: 'Failed',            bg: '#fee2e2', fg: '#dc2626' },
-  blocked:           { label: 'Blocked',           bg: '#ffedd5', fg: '#ea580c' },
-  awaiting_approval: { label: 'Awaiting Approval', bg: '#f3e8ff', fg: '#7c3aed' },
+// ─── Status Pill ──────────────────────────────────────────────────────────────
+const PILL_MAP = {
+  pending:           'Pending',
+  analyzing:         'Analyzing',
+  executing:         'Executing',
+  completed:         'Done',
+  failed:            'Failed',
+  blocked:           'Blocked',
+  awaiting_approval: 'Awaiting Approval',
+}
+function StatusPill({ status }) {
+  const cls = `rq-pill rq-pill--${status}`
+  return <span className={cls}><span className="rq-pill-dot"/>{PILL_MAP[status]||status}</span>
 }
 
-function Pill({ status }) {
-  const m = STATUS_META[status] || STATUS_META.pending
-  return (
-    <span className="pill" style={{ '--p-bg': m.bg, '--p-fg': m.fg }}>
-      {m.label}
-    </span>
-  )
-}
-
+// ─── Artifact Modal ───────────────────────────────────────────────────────────
 function ArtifactModal({ artifact, onClose }) {
-  const [content, setContent] = useState('Loading...')
+  const [content, setContent] = useState('Loading…')
   useEffect(() => {
     fetch(`/api/artifacts/${artifact.id}/content`)
-      .then(r => r.text())
-      .then(setContent)
-      .catch(() => setContent('Failed to load'))
+      .then(r => r.text()).then(setContent).catch(() => setContent('Failed to load'))
   }, [artifact.id])
-
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <span className="modal-title">{artifact.path}</span>
-          <button className="btn-icon" onClick={onClose}>✕</button>
+    <div className="rq-overlay" onClick={onClose}>
+      <div className="rq-modal rq-modal-wide" onClick={e => e.stopPropagation()}>
+        <div className="rq-modal-header">
+          <span className="rq-modal-title">{artifact.path}</span>
+          <button className="rq-icon-btn" onClick={onClose} aria-label="Close">✕</button>
         </div>
-        <pre className="code-block">{content}</pre>
+        <pre className="rq-code-block">{content}</pre>
       </div>
     </div>
   )
 }
 
-const AGENT_META = {
-  architect: { label: 'Architect', color: '#0ea5e9' },
-  developer: { label: 'Developer', color: '#8b5cf6' },
-  tester:    { label: 'Tester',    color: '#f59e0b' },
-}
-
-function AgentBadge({ agentType }) {
-  const m = AGENT_META[agentType] || AGENT_META.developer
+// ─── Plan Step (task in execution panel) ─────────────────────────────────────
+function PlanStep({ task, onRetry }) {
+  const iconMap = { completed: '✓', executing: '◌', failed: '✗', pending: '○', analyzing: '◎' }
+  const icon = iconMap[task.status] || '○'
+  const ag = AGENTS[task.agent_type] || AGENTS.developer
   return (
-    <span className="agent-badge" style={{ '--ab-color': m.color }}>{m.label}</span>
-  )
-}
-
-function TaskRow({ task, onRetry }) {
-  const statusColor = task.status === 'completed' ? '#059669' : task.status === 'executing' ? '#2563eb' : task.status === 'failed' ? '#dc2626' : '#9ca3af'
-  const icon = task.status === 'completed' ? '✓' : task.status === 'executing' ? '◌' : task.status === 'failed' ? '✗' : '○'
-  return (
-    <div className="task-row">
-      <div className="task-icon-wrap" style={{ color: statusColor }}>{icon}</div>
-      <div className="task-body">
-        <div className="task-title">{task.title}</div>
-        {task.description && <div className="task-desc">{task.description}</div>}
-        <div className="task-meta-row">
-          <AgentBadge agentType={task.agent_type || 'developer'} />
-          {task.model && <span className="task-model">{task.model.replace('claude-','').replace('-4-5','')}</span>}
-          {task.cost_usd > 0 && <span className="task-cost">${Number(task.cost_usd).toFixed(4)} · {task.tokens} tokens</span>}
+    <div className="rq-plan-step">
+      <span className={`rq-step-icon ${task.status}`}>{icon}</span>
+      <div className="rq-step-body">
+        <div className="rq-step-title">{task.title}</div>
+        <div className="rq-step-meta-row">
+          <span className="rq-agent-badge" style={{ '--ag-col': ag.color }}>{ag.name}</span>
+          {task.model && (
+            <span className="rq-model-badge">{task.model.replace('claude-','').replace('-4-5','')}</span>
+          )}
+          {task.cost_usd > 0 && (
+            <span className="rq-cost-badge">${Number(task.cost_usd).toFixed(4)}</span>
+          )}
           {task.github_pr_url && (
-            <a className="pr-link" href={task.github_pr_url} target="_blank" rel="noreferrer">
-              View PR on GitHub
-            </a>
+            <a className="rq-pr-link" href={task.github_pr_url} target="_blank" rel="noreferrer">↗ PR</a>
           )}
           {task.status === 'failed' && onRetry && (
-            <button className="btn-retry" onClick={() => onRetry(task.id)}>↺ Retry</button>
+            <button className="rq-retry-btn" onClick={() => onRetry(task.id)}>↺ Retry</button>
           )}
         </div>
       </div>
-      <Pill status={task.status} />
+      <StatusPill status={task.status}/>
     </div>
   )
 }
 
-function ActivityFeed({ logs }) {
-  const endRef = useRef(null)
-  useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [logs])
-  if (!logs.length) return null
-  return (
-    <div className="activity-feed">
-      <div className="panel-title">Activity</div>
-      <div className="activity-log">
-        {logs.map((l, i) => (
-          <div key={i} className="activity-line">
-            <span className="activity-dot" />
-            <span className="activity-msg">{l.msg}</span>
-            <span className="activity-time">{l.time}</span>
-          </div>
-        ))}
-        <div ref={endRef} />
+// ─── Execution Panel ──────────────────────────────────────────────────────────
+function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, onRetry, onArtifactClick, isConnected }) {
+  if (!order) {
+    return (
+      <div className="rq-exec-empty">
+        <div className="rq-exec-empty-title">Execution view</div>
+        <div className="rq-exec-empty-desc">Select a conversation to see task details, plan steps and generated files.</div>
       </div>
-    </div>
-  )
-}
+    )
+  }
 
-function OrderCard({ order, tasks, costs, expanded, onExpand, onApprove, onRetry }) {
-  const taskList = tasks[order.id] || []
-  const done = taskList.filter(t => t.status === 'completed').length
-  const agentName = 'Coordinator'
-  const preview = order.description ? order.description.slice(0, 80) + (order.description.length > 80 ? '...' : '') : ''
-  const ts = new Date(order.created_at)
-  const timeStr = isNaN(ts) ? '' : ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const cost = costs[order.id]
-  const hasArtifacts = taskList.some(t => t.status === 'completed')
+  const done = tasks.filter(t => t.status === 'completed').length
+  const isActive = ['pending','analyzing','executing','awaiting_approval'].includes(order.status)
+  const orderArtifacts = artifacts.filter(a => tasks.some(t => t.id === a.task_id))
 
   return (
-    <div className={`order-card${expanded ? ' expanded' : ''}`}>
-      <div className="order-header" onClick={onExpand}>
-        <Avatar name={agentName} size={42} />
-        <div className="order-header-body">
-          <div className="order-header-top">
-            <span className="order-agent-name">{agentName}</span>
-            <span className="order-time">{timeStr}</span>
-          </div>
-          <div className="order-title">{order.title}</div>
-          {!expanded && preview && <div className="order-preview">{preview}</div>}
-          <div className="order-header-foot">
-            {taskList.length > 0 && <span className="order-task-count">{done}/{taskList.length} tasks</span>}
-            {cost && cost.total_cost > 0 && (
-              <span className="order-cost">${Number(cost.total_cost).toFixed(4)}</span>
-            )}
-            <Pill status={order.status} />
-          </div>
+    <>
+      <div className="rq-exec-header">
+        <div>
+          <div className="rq-exec-title">Execution view</div>
+          <div className="rq-exec-order-title">{order.title}</div>
+        </div>
+        <div className="rq-live-indicator">
+          <div className={`rq-live-dot${isActive && isConnected ? ' pulse' : isActive ? '' : ' off'}`}/>
+          <span className="rq-live-label">
+            {isActive && isConnected ? 'Live' : isActive ? 'Reconnecting' : 'Done'}
+          </span>
         </div>
       </div>
-      {expanded && (
-        <div className="order-body">
-          <p className="order-desc">{order.description}</p>
-          {cost && cost.total_tokens > 0 && (
-            <div className="order-cost-detail">
-              {cost.total_tokens.toLocaleString()} tokens · ${Number(cost.total_cost).toFixed(4)} · {cost.executions} execution(s)
+
+      {/* Status */}
+      <div className="rq-exec-section" style={{ paddingTop: 12, paddingBottom: 12 }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+          <StatusPill status={order.status}/>
+          {tasks.length > 0 && (
+            <span style={{ font:'400 12px/18px var(--rq-font)', color:'var(--rq-muted)' }}>
+              {done}/{tasks.length} tasks
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Approval */}
+      {order.status === 'awaiting_approval' && (
+        <div className="rq-exec-section">
+          <div className="rq-section-label">Your decision</div>
+          <div className="rq-approval">
+            <div className="rq-approval-title">Approve execution plan</div>
+            <div className="rq-approval-desc">
+              {tasks.length} task{tasks.length !== 1 ? 's' : ''} planned. Review them below and approve to start execution.
             </div>
-          )}
-          {order.status === 'awaiting_approval' && (
-            <div className="approve-bar">
-              <span className="approve-msg">O coordenador planejou {taskList.length} tarefas. Aprovar execução?</span>
-              <button className="btn-approve" onClick={() => onApprove(order.id)}>✓ Aprovar e Executar</button>
-            </div>
-          )}
-          {taskList.length === 0 && order.status === 'pending' && (
-            <p className="order-waiting">Waiting for coordinator...</p>
-          )}
-          {taskList.map(t => <TaskRow key={t.id} task={t} onRetry={onRetry} />)}
-          {hasArtifacts && (
-            <div className="order-download-row">
-              <a className="btn-zip" href={`/api/orders/${order.id}/artifacts/download`} download>
-                ⬇ Download ZIP
-              </a>
-            </div>
-          )}
+            <button className="rq-approve-btn" onClick={() => onApprove(order.id)}>
+              ✓ Approve & Execute
+            </button>
+          </div>
         </div>
       )}
+
+      {/* Plan steps */}
+      {tasks.length > 0 && (
+        <div className="rq-exec-section">
+          <div className="rq-section-label">Plan · {tasks.length} step{tasks.length !== 1 ? 's' : ''}</div>
+          <div className="rq-plan-steps">
+            {tasks.map(t => <PlanStep key={t.id} task={t} onRetry={onRetry}/>)}
+          </div>
+        </div>
+      )}
+
+      {/* Artifacts */}
+      {orderArtifacts.length > 0 && (
+        <div className="rq-exec-section">
+          <div className="rq-section-label">Generated files · {orderArtifacts.length}</div>
+          <div className="rq-artifact-list">
+            {orderArtifacts.slice(0,12).map(a => (
+              <div key={a.id} className="rq-artifact-row" onClick={() => onArtifactClick(a)}>
+                <span style={{ fontSize:11 }}>📄</span>
+                <span className="rq-artifact-path">{a.path}</span>
+              </div>
+            ))}
+          </div>
+          <div className="rq-artifact-actions">
+            <a className="rq-zip-btn" href={`/api/orders/${order.id}/artifacts/download`} download>
+              ⬇ Download ZIP
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* Budget / Cost */}
+      <div className="rq-exec-section">
+        <div className="rq-section-label">Usage</div>
+        {cost && Number(cost.total_cost) > 0 ? (
+          <>
+            <div className="rq-budget-row">
+              <span className="rq-budget-value">${Number(cost.total_cost).toFixed(4)}</span>
+              <span className="rq-budget-limit">{Number(cost.total_tokens||0).toLocaleString()} tokens</span>
+            </div>
+          </>
+        ) : (
+          <span style={{ font:'400 13px/20px var(--rq-font)', color:'var(--rq-muted)' }}>
+            Usage unavailable
+          </span>
+        )}
+      </div>
+    </>
+  )
+}
+
+// ─── Chat message (one order = outgoing + incoming pair) ──────────────────────
+function ChatMessage({ order, tasks, cost, isSelected, onClick, onApprove }) {
+  const ts = new Date(order.created_at)
+  const timeStr = isNaN(ts) ? '' : ts.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })
+  const done = tasks.filter(t => t.status === 'completed').length
+  const total = tasks.length
+
+  let agentText = ''
+  switch (order.status) {
+    case 'pending':   agentText = 'Analyzing your request…'; break
+    case 'analyzing': agentText = 'Planning tasks…'; break
+    case 'awaiting_approval':
+      agentText = `I've planned ${total} task${total!==1?'s':''}. Review and approve to start.`; break
+    case 'executing':
+      agentText = total ? `${done}/${total} tasks completed` : 'Working on it…'; break
+    case 'completed':
+      agentText = `Order complete · ${total} task${total!==1?'s':''}`
+      if (cost && Number(cost.total_cost)>0) agentText += ` · $${Number(cost.total_cost).toFixed(4)}`
+      break
+    case 'failed':
+      agentText = 'Some tasks failed. Check the execution panel for details.'; break
+    default: agentText = 'Processing…'
+  }
+
+  return (
+    <div className="rq-message-group" role="article">
+      {/* Outgoing — user's order */}
+      <div className="rq-message-row rq-message-row--out">
+        <div className="rq-msg-body">
+          <div
+            className={`rq-bubble rq-bubble--out${isSelected?' rq-bubble--sel':''}`}
+            onClick={onClick}
+          >
+            <div className="rq-bubble-title">{order.title}</div>
+            {order.description && (
+              <div className="rq-bubble-desc">
+                {order.description.length > 120
+                  ? order.description.slice(0,120) + '…'
+                  : order.description}
+              </div>
+            )}
+          </div>
+          <span className="rq-ts">{timeStr}</span>
+        </div>
+      </div>
+
+      {/* Incoming — agent response */}
+      <div className="rq-message-row">
+        <div className="rq-msg-avatar">
+          <AgentAvatar type="coordinator" size={32}/>
+        </div>
+        <div className="rq-msg-body">
+          <div className="rq-msg-sender">Atlas · Coordinator</div>
+          <div
+            className={`rq-bubble${isSelected?' rq-bubble--sel':''}`}
+            onClick={onClick}
+          >
+            <div className="rq-bubble-status">{agentText}</div>
+            {order.status === 'awaiting_approval' && (
+              <button className="rq-bubble-action" onClick={e => { e.stopPropagation(); onApprove(order.id) }}>
+                ✓ Approve & Execute
+              </button>
+            )}
+          </div>
+          {order.status !== 'pending' && (
+            <span className="rq-ts">
+              {new Date(order.updated_at || order.created_at).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
 
+// ─── Composer ─────────────────────────────────────────────────────────────────
+function Composer({ value, onChange, onSend, disabled }) {
+  const ref = useRef(null)
+  const handleKey = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault()
+      onSend()
+    }
+  }
+  // Auto-resize
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 144) + 'px'
+  }, [value])
+  return (
+    <div className="rq-composer">
+      <div className="rq-composer-row">
+        <textarea
+          ref={ref}
+          className="rq-composer-ta"
+          placeholder="Describe what you want to build… (Enter to send, Shift+Enter for new line)"
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          onKeyDown={handleKey}
+          rows={1}
+        />
+        <button className="rq-send-btn" onClick={onSend} disabled={disabled || !value.trim()} aria-label="Send">
+          ↑ Send
+        </button>
+      </div>
+      <div className="rq-composer-hint">Enter to send · Shift+Enter for new line</div>
+    </div>
+  )
+}
+
+// ─── Agent Strip ──────────────────────────────────────────────────────────────
+function AgentStrip({ allTasks }) {
+  const getActivity = (agentType) => {
+    const mine = allTasks.filter(t => t.agent_type === agentType || (agentType==='coordinator' && t.agent_type==null))
+    if (mine.some(t => t.status==='executing')) return 'Executing'
+    if (mine.some(t => t.status==='pending'))   return 'In queue'
+    if (mine.length && mine.every(t => t.status==='completed')) return 'Done'
+    return 'Available'
+  }
+  return (
+    <div className="rq-agent-strip-wrapper">
+      <div className="rq-agent-strip-label">Project team</div>
+      <div className="rq-agent-strip">
+        {Object.entries(AGENTS).map(([type, ag]) => (
+          <div key={type} className="rq-agent-item" title={ag.role}>
+            <AgentAvatar type={type} size={28}/>
+            <div className="rq-agent-info">
+              <span className="rq-agent-name">{ag.name}</span>
+              <span className="rq-agent-activity">{getActivity(type)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
 export default function App() {
+  // ── State ──────────────────────────────────────────────────────────────────
   const [page, setPage] = useState('home')
   const [projects, setProjects] = useState([])
   const [project, setProject] = useState(null)
@@ -194,24 +372,27 @@ export default function App() {
   const [costs, setCosts] = useState({})
   const [activityLogs, setActivityLogs] = useState([])
   const [artifacts, setArtifacts] = useState([])
-  const [expandedOrders, setExpandedOrders] = useState({})
   const [selectedArtifact, setSelectedArtifact] = useState(null)
+  const [selectedOrderId, setSelectedOrderId] = useState(null)
   const [showNewProject, setShowNewProject] = useState(false)
-  const [showNewOrder, setShowNewOrder] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectDesc, setNewProjectDesc] = useState('')
   const [newProjectRepo, setNewProjectRepo] = useState('')
-  const [newOrderTitle, setNewOrderTitle] = useState('')
-  const [newOrderDesc, setNewOrderDesc] = useState('')
   const [settingsAutonomy, setSettingsAutonomy] = useState('delegated')
   const [settingsBudget, setSettingsBudget] = useState('')
+  const [composerText, setComposerText] = useState('')
+  const [isConnected, setIsConnected] = useState(false)
+  const [showExecDrawer, setShowExecDrawer] = useState(false)
+
   const wsRef = useRef(null)
   const wsProjectRef = useRef(null)
   const reconnectTimer = useRef(null)
   const projectRef = useRef(null)
   const ordersRef = useRef([])
+  const messagesEndRef = useRef(null)
 
+  // ── Data loaders ───────────────────────────────────────────────────────────
   const loadOrderCost = async (orderId) => {
     const r = await fetch(`/api/orders/${orderId}/cost`)
     const d = await r.json()
@@ -225,27 +406,32 @@ export default function App() {
 
   useEffect(() => { loadProjects() }, [loadProjects])
 
+  // Restore last project from localStorage
   useEffect(() => {
     const saved = localStorage.getItem('orchestra_project')
     if (saved) {
-      try {
-        const p = JSON.parse(saved)
-        openProject(p)
-      } catch {}
+      try { openProject(JSON.parse(saved)) } catch {}
     }
-  }, [])
+  }, []) // eslint-disable-line
 
+  // ── Open project ───────────────────────────────────────────────────────────
   const openProject = async (p) => {
     setProject(p); setPage('project')
     projectRef.current = p
-    setOrders([]); setTasks({}); setCosts({}); setArtifacts([]); setExpandedOrders({}); setActivityLogs([])
+    setOrders([]); setTasks({}); setCosts({}); setArtifacts([])
+    setActivityLogs([]); setSelectedOrderId(null); setIsConnected(false)
     try { localStorage.setItem('orchestra_project', JSON.stringify(p)) } catch {}
     const res = await fetch(`/api/projects/${p.id}`)
     const data = await res.json()
     const freshOrders = data.orders || []
     setOrders(freshOrders)
     ordersRef.current = freshOrders
-    for (const o of data.orders || []) {
+    // Auto-select the most recently active order
+    const active = freshOrders.find(o => ['pending','analyzing','executing','awaiting_approval'].includes(o.status))
+    if (active) setSelectedOrderId(active.id)
+    else if (freshOrders.length) setSelectedOrderId(freshOrders[0].id)
+
+    for (const o of freshOrders) {
       const tr = await fetch(`/api/orders/${o.id}/tasks`)
       const td = await tr.json()
       setTasks(prev => ({ ...prev, [o.id]: td.map(t => ({ ...t, tokens: t.tokens_used })) }))
@@ -256,6 +442,7 @@ export default function App() {
     connectWs(p.id)
   }
 
+  // ── WebSocket ──────────────────────────────────────────────────────────────
   const handleWsMessage = useCallback((e) => {
     const ev = JSON.parse(e.data)
     if (ev.type === 'order_updated') {
@@ -271,7 +458,7 @@ export default function App() {
         ...prev,
         [ev.task.order_id]: [...(prev[ev.task.order_id] || []), ev.task]
       }))
-      setExpandedOrders(prev => ({ ...prev, [ev.task.order_id]: true }))
+      setSelectedOrderId(ev.task.order_id)
     } else if (ev.type === 'task_updated') {
       setTasks(prev => {
         const next = {}
@@ -284,7 +471,7 @@ export default function App() {
         return next
       })
     } else if (ev.type === 'activity') {
-      const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      const now = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' })
       setActivityLogs(prev => [...prev.slice(-99), { msg: ev.msg, time: now, task_id: ev.task_id }])
     }
   }, [])
@@ -295,28 +482,29 @@ export default function App() {
     wsProjectRef.current = projectId
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
     const ws = new WebSocket(`${proto}://${window.location.host}/ws/${projectId}`)
+    ws.onopen = () => setIsConnected(true)
     ws.onmessage = handleWsMessage
     ws.onclose = () => {
+      setIsConnected(false)
       if (wsProjectRef.current !== projectId) return
       reconnectTimer.current = setTimeout(() => connectWs(projectId), 3000)
     }
     wsRef.current = ws
   }, [handleWsMessage])
 
-  // Keep refs in sync so polling closure always has fresh values
+  // Keep refs in sync
   useEffect(() => { ordersRef.current = orders }, [orders])
   useEffect(() => { projectRef.current = project }, [project])
 
-  // Polling fallback — stable interval, reads state via refs to avoid dep loop
+  // Polling fallback
   useEffect(() => {
     if (page !== 'project') return
-    const ACTIVE = new Set(['pending', 'analyzing', 'executing', 'awaiting_approval'])
+    const ACTIVE = new Set(['pending','analyzing','executing','awaiting_approval'])
     const poll = async () => {
       const proj = projectRef.current
       if (!proj) return
       const active = ordersRef.current.filter(o => ACTIVE.has(o.status))
       if (!active.length) return
-
       for (const o of active) {
         const tr = await fetch(`/api/orders/${o.id}/tasks`).catch(() => null)
         if (!tr?.ok) continue
@@ -325,26 +513,29 @@ export default function App() {
         const cr = await fetch(`/api/orders/${o.id}/cost`).catch(() => null)
         if (cr?.ok) { const cd = await cr.json(); setCosts(prev => ({ ...prev, [o.id]: cd })) }
       }
-
       const pr = await fetch(`/api/projects/${proj.id}`).catch(() => null)
       if (!pr?.ok) return
       const pd = await pr.json()
       const fresh = pd.orders || []
-      // Merge status updates instead of replacing — preserves React identity of objects
       setOrders(prev => prev.map(o => {
         const f = fresh.find(x => x.id === o.id)
         return f ? { ...o, status: f.status, updated_at: f.updated_at } : o
       }))
       ordersRef.current = fresh
-      // Re-fetch artifacts if anything completed
       if (fresh.some(o => o.status === 'completed')) {
         fetch(`/api/projects/${proj.id}/artifacts`).then(r => r.json()).then(setArtifacts).catch(() => {})
       }
     }
     const id = setInterval(poll, 5000)
     return () => clearInterval(id)
-  }, [page])  // stable — never recreated while on the project page
+  }, [page])
 
+  // Auto-scroll chat on new orders
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [orders.length])
+
+  // ── Actions ────────────────────────────────────────────────────────────────
   const openSettings = (p) => {
     setSettingsAutonomy(p.autonomy || 'delegated')
     setSettingsBudget(p.budget_usd != null ? String(p.budget_usd) : '')
@@ -397,181 +588,285 @@ export default function App() {
     })
     const p = await res.json()
     setProjects(prev => [p, ...prev])
-    setNewProjectName(''); setNewProjectDesc(''); setNewProjectRepo(''); setShowNewProject(false)
+    setNewProjectName(''); setNewProjectDesc(''); setNewProjectRepo('')
+    setShowNewProject(false)
   }
 
   const createOrder = async () => {
-    if (!newOrderTitle.trim() || !project) return
+    if (!composerText.trim() || !project) return
+    const lines = composerText.trim().split('\n')
+    const title = lines[0].slice(0, 120)
+    const description = lines.length > 1 ? lines.slice(1).join('\n').trim() : composerText.trim()
     const res = await fetch(`/api/projects/${project.id}/orders`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: newOrderTitle, description: newOrderDesc })
+      body: JSON.stringify({ title, description })
     })
     const o = await res.json()
-    setOrders(prev => [o, ...prev])
+    setOrders(prev => [...prev, o])
     setTasks(prev => ({ ...prev, [o.id]: [] }))
-    setExpandedOrders(prev => ({ ...prev, [o.id]: true }))
-    setNewOrderTitle(''); setNewOrderDesc(''); setShowNewOrder(false)
+    setSelectedOrderId(o.id)
+    setComposerText('')
     loadOrderCost(o.id)
   }
 
+  const goHome = () => {
+    setPage('home'); loadProjects()
+    wsProjectRef.current = null
+    setIsConnected(false)
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
+    if (wsRef.current) wsRef.current.close()
+    try { localStorage.removeItem('orchestra_project') } catch {}
+  }
+
+  // ── Derived data ───────────────────────────────────────────────────────────
+  const allTasks = Object.values(tasks).flat()
+  const selectedOrder = orders.find(o => o.id === selectedOrderId) || null
+  const selectedTasks = selectedOrderId ? (tasks[selectedOrderId] || []) : []
+  const selectedCost  = selectedOrderId ? costs[selectedOrderId] : null
+  // Show orders oldest-first in chat (reverse of DESC API order)
+  const chatOrders = [...orders].reverse()
+
+  // ── Shared modals ──────────────────────────────────────────────────────────
+  const modals = (
+    <>
+      {selectedArtifact && (
+        <ArtifactModal artifact={selectedArtifact} onClose={() => setSelectedArtifact(null)}/>
+      )}
+      {showSettings && project && (
+        <div className="rq-overlay" onClick={() => setShowSettings(false)}>
+          <div className="rq-modal" onClick={e => e.stopPropagation()}>
+            <div className="rq-modal-header">
+              <span className="rq-modal-title">Project Settings</span>
+              <button className="rq-icon-btn" onClick={() => setShowSettings(false)}>✕</button>
+            </div>
+            <div className="rq-modal-body">
+              <label className="rq-label">Autonomy Mode</label>
+              <select className="rq-input" value={settingsAutonomy} onChange={e => setSettingsAutonomy(e.target.value)}>
+                <option value="delegated">Delegated — agents run automatically</option>
+                <option value="supervised">Supervised — monitor, no approval needed</option>
+                <option value="planning">Planning — approve plan before execution</option>
+              </select>
+              <label className="rq-label">Budget Limit (USD)</label>
+              <input className="rq-input" type="number" min="0" step="0.01"
+                placeholder="Leave empty for unlimited"
+                value={settingsBudget} onChange={e => setSettingsBudget(e.target.value)}/>
+              {project.total_cost > 0 && (
+                <span className="rq-hint">Spent so far: ${Number(project.total_cost).toFixed(4)}</span>
+              )}
+              <button className="rq-btn rq-btn--primary" onClick={saveSettings}>Save Settings</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+
+  // ── Home page ──────────────────────────────────────────────────────────────
   if (page === 'home') return (
-    <div className="app">
-      <header className="top-bar">
-        <div className="logo">Orchestra</div>
-        <button className="btn-primary" onClick={() => setShowNewProject(true)}>+ New Project</button>
+    <div className="rq-shell">
+      <header className="rq-header">
+        <div className="rq-header-inner">
+          <span className="rq-header-logo">Orchestra</span>
+          <div className="rq-header-actions">
+            <button className="rq-btn rq-btn--primary rq-btn--sm" onClick={() => setShowNewProject(true)}>
+              + New Project
+            </button>
+          </div>
+        </div>
       </header>
 
       {showNewProject && (
-        <div className="modal-overlay" onClick={() => setShowNewProject(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">New Project</span>
-              <button className="btn-icon" onClick={() => setShowNewProject(false)}>✕</button>
+        <div className="rq-overlay" onClick={() => setShowNewProject(false)}>
+          <div className="rq-modal" onClick={e => e.stopPropagation()}>
+            <div className="rq-modal-header">
+              <span className="rq-modal-title">New Project</span>
+              <button className="rq-icon-btn" onClick={() => setShowNewProject(false)}>✕</button>
             </div>
-            <div className="form-body">
-              <input className="input" placeholder="Project name" value={newProjectName}
-                onChange={e => setNewProjectName(e.target.value)} autoFocus />
-              <textarea className="input" placeholder="Description (optional)" rows={2}
-                value={newProjectDesc} onChange={e => setNewProjectDesc(e.target.value)} />
-              <input className="input" placeholder="GitHub repo (optional) — e.g. owner/repo" value={newProjectRepo}
-                onChange={e => setNewProjectRepo(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && createProject()} />
-              <button className="btn-primary" onClick={createProject}>Create Project</button>
+            <div className="rq-modal-body">
+              <input className="rq-input" placeholder="Project name" value={newProjectName}
+                onChange={e => setNewProjectName(e.target.value)} autoFocus/>
+              <textarea className="rq-input" placeholder="Description (optional)" rows={2}
+                value={newProjectDesc} onChange={e => setNewProjectDesc(e.target.value)}/>
+              <input className="rq-input" placeholder="GitHub repo (optional) — owner/repo"
+                value={newProjectRepo} onChange={e => setNewProjectRepo(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && createProject()}/>
+              <button className="rq-btn rq-btn--primary" onClick={createProject}>Create Project</button>
             </div>
           </div>
         </div>
       )}
 
-      <main className="main-content">
+      <main>
         {projects.length === 0 ? (
-          <div className="empty-state">
-            <div className="empty-icon">◎</div>
-            <h2>No projects yet</h2>
-            <p>Create a project and give autonomous AI agents their orders.</p>
-            <button className="btn-primary" onClick={() => setShowNewProject(true)}>Create your first project</button>
+          <div className="rq-home-content">
+            <div className="rq-empty">
+              <div className="rq-empty-icon">◎</div>
+              <h2>No projects yet</h2>
+              <p>Create a project and give autonomous AI agents their orders.</p>
+              <button className="rq-btn rq-btn--primary" onClick={() => setShowNewProject(true)}>
+                Create your first project
+              </button>
+            </div>
           </div>
         ) : (
-          <div className="project-grid">
-            {projects.map(p => (
-              <div key={p.id} className="project-card" onClick={() => openProject(p)}>
-                <Avatar name={p.name} size={48} />
-                <div className="project-card-body">
-                  <div className="project-card-name">{p.name}</div>
-                  {p.github_repo && <div className="project-card-repo">{p.github_repo}</div>}
-                  {p.description && <div className="project-card-desc">{p.description}</div>}
-                  <div className="project-card-meta">{p.order_count || 0} orders</div>
+          <div className="rq-home-content">
+            <div className="rq-home-section-title">Projects</div>
+            <div className="rq-project-grid">
+              {projects.map(p => (
+                <div key={p.id} className="rq-project-card" onClick={() => openProject(p)}>
+                  <InitialsAvatar name={p.name} size={44}/>
+                  <div className="rq-project-card-body">
+                    <div className="rq-project-card-name">{p.name}</div>
+                    {p.github_repo && <div className="rq-project-card-repo">{p.github_repo}</div>}
+                    {p.description && <div className="rq-project-card-desc">{p.description}</div>}
+                    <div className="rq-project-card-meta">{p.order_count || 0} orders</div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
       </main>
     </div>
   )
 
+  // ── Project page ───────────────────────────────────────────────────────────
+  const execPanel = (
+    <div className="rq-panel rq-exec-panel">
+      <ExecutionPanel
+        order={selectedOrder}
+        tasks={selectedTasks}
+        cost={selectedCost}
+        artifacts={artifacts}
+        projectId={project?.id}
+        onApprove={approveOrder}
+        onRetry={retryTask}
+        onArtifactClick={setSelectedArtifact}
+        isConnected={isConnected}
+      />
+      {activityLogs.length > 0 && (
+        <div className="rq-exec-section">
+          <div className="rq-section-label">Activity</div>
+          <div className="rq-activity-list">
+            {activityLogs.slice(-8).map((l,i) => (
+              <div key={i} className="rq-activity-row">
+                <span className="rq-activity-dot"/>
+                <span className="rq-activity-msg">{l.msg}</span>
+                <span className="rq-activity-time">{l.time}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
   return (
-    <div className="app">
-      <header className="top-bar">
-        <button className="btn-ghost" onClick={() => {
-          setPage('home'); loadProjects();
-          wsProjectRef.current = null
-          if (reconnectTimer.current) clearTimeout(reconnectTimer.current)
-          if (wsRef.current) wsRef.current.close()
-          try { localStorage.removeItem('orchestra_project') } catch {}
-        }}>← Projects</button>
-        <div className="logo">{project?.name}</div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn-ghost" onClick={() => openSettings(project)}>⚙ Settings</button>
-          <button className="btn-primary" onClick={() => setShowNewOrder(true)}>+ New Order</button>
+    <div className="rq-shell">
+      {modals}
+
+      {/* ── Header ──────────────────────────────────────────────────── */}
+      <header className="rq-header">
+        <div className="rq-header-inner">
+          <span className="rq-header-logo">Orchestra</span>
+          <div className="rq-header-sep"/>
+          <div className="rq-header-actions">
+            <button className="rq-nav-btn" onClick={() => openSettings(project)}>⚙ Settings</button>
+          </div>
         </div>
       </header>
 
-      {showNewOrder && (
-        <div className="modal-overlay" onClick={() => setShowNewOrder(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">New Order</span>
-              <button className="btn-icon" onClick={() => setShowNewOrder(false)}>✕</button>
-            </div>
-            <div className="form-body">
-              <input className="input" placeholder="What do you want to build?" value={newOrderTitle}
-                onChange={e => setNewOrderTitle(e.target.value)} autoFocus />
-              <textarea className="input" placeholder="Describe in detail what the agents should implement..." rows={5}
-                value={newOrderDesc} onChange={e => setNewOrderDesc(e.target.value)} />
-              <button className="btn-primary" onClick={createOrder}>Send to Coordinator</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {selectedArtifact && (
-        <ArtifactModal artifact={selectedArtifact} onClose={() => setSelectedArtifact(null)} />
-      )}
-
-      {showSettings && project && (
-        <div className="modal-overlay" onClick={() => setShowSettings(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">Project Settings</span>
-              <button className="btn-icon" onClick={() => setShowSettings(false)}>✕</button>
-            </div>
-            <div className="form-body">
-              <label style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Autonomy Mode</label>
-              <select className="input" value={settingsAutonomy} onChange={e => setSettingsAutonomy(e.target.value)}>
-                <option value="delegated">Delegated — agents run automatically</option>
-                <option value="supervised">Supervised — monitor but no approval needed</option>
-                <option value="planning">Planning — approve task plan before execution</option>
-              </select>
-              <label style={{ fontSize: '0.8125rem', fontWeight: 600 }}>Budget Limit (USD)</label>
-              <input className="input" type="number" min="0" step="0.01"
-                placeholder="Leave empty for unlimited"
-                value={settingsBudget} onChange={e => setSettingsBudget(e.target.value)} />
-              {project.total_cost > 0 && (
-                <div style={{ fontSize: '0.8rem', color: 'var(--fg2)' }}>
-                  Spent so far: ${Number(project.total_cost).toFixed(4)}
-                </div>
-              )}
-              <button className="btn-primary" onClick={saveSettings}>Save Settings</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <main className="main-content two-col">
-        <section className="orders-section">
-          {orders.length === 0 ? (
-            <div className="empty-state small">
-              <p>No orders yet. Tell the agents what to build.</p>
-            </div>
-          ) : orders.map(o => (
-            <OrderCard key={o.id} order={o} tasks={tasks} costs={costs}
-              expanded={!!expandedOrders[o.id]}
-              onExpand={() => setExpandedOrders(prev => ({ ...prev, [o.id]: !prev[o.id] }))}
-              onApprove={approveOrder}
-              onRetry={retryTask} />
-          ))}
-        </section>
-
-        <aside className="right-panel">
-          <ActivityFeed logs={activityLogs} />
-          {artifacts.length > 0 && (
-            <div className="artifacts-panel">
-              <div className="panel-title-row">
-                <span className="panel-title">Generated Files</span>
-                <a className="btn-zip" href={`/api/projects/${project?.id}/artifacts/download`} download>
-                  ⬇ ZIP
-                </a>
-              </div>
-              {artifacts.map(a => (
-                <div key={a.id} className="artifact-row" onClick={() => setSelectedArtifact(a)}>
-                  <span className="artifact-icon">📄</span>
-                  <span className="artifact-path">{a.path}</span>
-                </div>
-              ))}
-            </div>
+      <div className="rq-workspace">
+        {/* ── Project Line ────────────────────────────────────────── */}
+        <div className="rq-project-line">
+          <button className="rq-back-btn" onClick={goHome}>← Projects</button>
+          <div className="rq-header-sep"/>
+          <span className="rq-project-name">{project?.name}</span>
+          {project?.github_repo && (
+            <a className="rq-github-chip"
+              href={`https://github.com/${project.github_repo}`}
+              target="_blank" rel="noreferrer">
+              <span className={`rq-online-dot${isConnected?'':' off'}`}/>
+              {project.github_repo}
+            </a>
           )}
-        </aside>
-      </main>
+          <div className="rq-project-actions">
+            {/* Tablet: open drawer */}
+            {selectedOrder && (
+              <button className="rq-drawer-btn" onClick={() => setShowExecDrawer(true)}>
+                Execution ▸
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ── Agent Strip ─────────────────────────────────────────── */}
+        <AgentStrip allTasks={allTasks}/>
+
+        {/* ── Workspace Grid ──────────────────────────────────────── */}
+        <div className="rq-layout">
+          {/* Chat column */}
+          <div className="rq-panel rq-chat">
+            <div className="rq-chat-header">
+              <div>
+                <div className="rq-chat-header-title">Team conversation</div>
+                <div className="rq-chat-header-sub">
+                  {orders.length} order{orders.length !== 1 ? 's' : ''}
+                  {isConnected
+                    ? <span style={{ color:'var(--rq-success)', marginLeft:8 }}>● Live</span>
+                    : <span style={{ color:'var(--rq-muted)', marginLeft:8 }}>○ Reconnecting…</span>}
+                </div>
+              </div>
+            </div>
+
+            {chatOrders.length === 0 ? (
+              <div className="rq-chat-empty">
+                <div className="rq-chat-empty-icon">◎</div>
+                <div className="rq-chat-empty-title">Start a conversation</div>
+                <div className="rq-chat-empty-desc">Describe what you want to build and the agents will plan and execute it.</div>
+              </div>
+            ) : (
+              <div className="rq-messages" role="log" aria-live="polite" aria-atomic="false">
+                {chatOrders.map(o => (
+                  <ChatMessage
+                    key={o.id}
+                    order={o}
+                    tasks={tasks[o.id] || []}
+                    cost={costs[o.id]}
+                    isSelected={o.id === selectedOrderId}
+                    onClick={() => setSelectedOrderId(o.id)}
+                    onApprove={approveOrder}
+                  />
+                ))}
+                <div ref={messagesEndRef}/>
+              </div>
+            )}
+
+            <Composer
+              value={composerText}
+              onChange={setComposerText}
+              onSend={createOrder}
+              disabled={false}
+            />
+          </div>
+
+          {/* Execution panel column (hidden on tablet via CSS) */}
+          <div className="rq-exec-col">
+            {execPanel}
+          </div>
+        </div>
+      </div>
+
+      {/* Tablet drawer */}
+      <div className={`rq-exec-drawer-overlay${showExecDrawer?' open':''}`}
+        onClick={() => setShowExecDrawer(false)}/>
+      <div className={`rq-exec-drawer${showExecDrawer?' open':''}`}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 24px', borderBottom:'1px solid var(--rq-border)' }}>
+          <span style={{ font:'600 15px/22px var(--rq-font)' }}>Execution</span>
+          <button className="rq-icon-btn" onClick={() => setShowExecDrawer(false)}>✕</button>
+        </div>
+        {execPanel}
+      </div>
     </div>
   )
 }
