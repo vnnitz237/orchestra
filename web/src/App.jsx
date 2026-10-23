@@ -85,8 +85,8 @@ function ArtifactModal({ artifact, onClose }) {
 
 // ─── Plan Step (task in execution panel) ─────────────────────────────────────
 function PlanStep({ task, onRetry }) {
-  const iconMap = { completed: '✓', executing: '◌', failed: '✗', pending: '○', analyzing: '◎' }
-  const icon = iconMap[task.status] || '○'
+  const iconMap = { completed: '✓', executing: '●', failed: '✕', pending: '', analyzing: '●' }
+  const icon = iconMap[task.status] || ''
   const ag = AGENTS[task.agent_type] || AGENTS.developer
   return (
     <div className="rq-plan-step">
@@ -206,19 +206,41 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
         </div>
       )}
 
+      {/* Próxima decisão — when a task is executing and order awaits approval */}
+      {order.status === 'executing' && tasks.some(t => t.status === 'executing') && (
+        <div className="rq-exec-section">
+          <div className="rq-next-decision">
+            <div className="rq-next-decision-label">Próxima decisão</div>
+            <div className="rq-next-decision-text">
+              {tasks.find(t => t.status === 'executing')?.title || 'Em execução…'}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Budget / Cost */}
       <div className="rq-exec-section">
-        <div className="rq-section-label">Usage</div>
-        {cost && Number(cost.total_cost) > 0 ? (
-          <>
-            <div className="rq-budget-row">
-              <span className="rq-budget-value">${Number(cost.total_cost).toFixed(4)}</span>
-              <span className="rq-budget-limit">{Number(cost.total_tokens||0).toLocaleString()} tokens</span>
-            </div>
-          </>
-        ) : (
+        <div className="rq-section-label">Consumo estimado</div>
+        {cost && Number(cost.total_cost) > 0 ? (() => {
+          const spent = Number(cost.total_cost)
+          const budget = order._budget || null
+          const pct = budget ? Math.min(spent / budget * 100, 100) : null
+          return (
+            <>
+              <div className="rq-budget-row">
+                <span className="rq-budget-value">US$ {spent.toFixed(4)}</span>
+                <span className="rq-budget-limit">{Number(cost.total_tokens||0).toLocaleString()} tokens</span>
+              </div>
+              {pct !== null && (
+                <div className="rq-budget-track">
+                  <div className={`rq-budget-fill${pct >= 90 ? ' over' : ''}`} style={{ width: `${pct}%` }}/>
+                </div>
+              )}
+            </>
+          )
+        })() : (
           <span style={{ font:'400 13px/20px var(--rq-font)', color:'var(--rq-muted)' }}>
-            Usage unavailable
+            Nenhum gasto ainda
           </span>
         )}
       </div>
@@ -280,7 +302,7 @@ function ChatMessage({ order, tasks, cost, isSelected, onClick, onApprove }) {
         <div className="rq-msg-body">
           <div className="rq-msg-sender">Atlas · Coordinator</div>
           <div
-            className={`rq-bubble${isSelected?' rq-bubble--sel':''}`}
+            className={`rq-bubble rq-bubble--in${isSelected?' rq-bubble--sel':''}`}
             onClick={onClick}
           >
             <div className="rq-bubble-status">{agentText}</div>
