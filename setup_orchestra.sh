@@ -78,6 +78,9 @@ line-length = 100
 target-version = "py311"
 [tool.black]
 line-length = 100
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["orchestra*", "orchestrator*"]
 EOF
 
 # ---- Dockerfile -------------------------------------------------------
