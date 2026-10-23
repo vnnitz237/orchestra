@@ -970,18 +970,6 @@ cat > web/src/App.css <<'EOF'
   color-scheme: light;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #1c1c1e; --surface: #2c2c2e; --surface2: #3a3a3c;
-    --border: rgba(255,255,255,.08); --fg: #f2f2f7; --fg2: #aeaeb2;
-    color-scheme: dark;
-  }
-}
-:root[data-theme="dark"] {
-  --bg: #1c1c1e; --surface: #2c2c2e; --surface2: #3a3a3c;
-  --border: rgba(255,255,255,.08); --fg: #f2f2f7; --fg2: #aeaeb2;
-  color-scheme: dark;
-}
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: var(--bg); color: var(--fg); min-height: 100vh; }
