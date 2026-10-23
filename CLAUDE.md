@@ -43,6 +43,7 @@ orchestra/
 │   │   ├── developer.py         ← Tec: gera código (AsyncAnthropic, streaming, review pass)
 │   │   ├── tester.py            ← Finn: gera testes (AsyncAnthropic, streaming)
 │   │   └── dispatch.py          ← roteador de agentes com auto-retry (até 2x, backoff exp.)
+│   ├── sandbox.py               ← executa artefatos Python em subprocesso isolado (novo)
 │   ├── db.py                    ← pool asyncpg
 │   ├── broadcast.py             ← publica eventos no Redis → WebSocket
 │   ├── ws.py                    ← ConnectionManager WebSocket
@@ -203,6 +204,7 @@ docker compose up --build
 | POST | `/api/orders/{id}/approve` | Aprova execução (autonomy=planning) |
 | GET | `/api/orders/{id}/cost` | Custo total do pedido |
 | POST | `/api/tasks/{id}/retry` | Retenta task com status 'failed' |
+| POST | `/api/tasks/{id}/execute` | Executa artefatos Python em sandbox (novo) |
 | GET | `/api/projects/{id}/artifacts` | Lista artefatos |
 | GET | `/api/projects/{id}/artifacts/download` | ZIP de todos artefatos |
 | GET | `/api/orders/{id}/artifacts/download` | ZIP de artefatos do pedido |
@@ -222,6 +224,8 @@ O backend publica via Redis → relay → todos os clientes conectados ao projet
 | `task_created` | `task` (objeto completo) |
 | `task_updated` | `task_id`, `status`, `github_pr_url`, `cost_usd`, `tokens`, `error` |
 | `activity` | `task_id`, `msg` (streaming preview do agente) |
+| `sandbox_start` | `task_id` (execução iniciada) |
+| `sandbox_result` | `task_id`, `ok` (bool), `output` (string), `exit_code` |
 
 ---
 
@@ -234,7 +238,7 @@ O backend publica via Redis → relay → todos os clientes conectados ao projet
 | `StatusPill` | Badge de status traduzido para português |
 | `ChatMessage` | Par mensagem-usuário + resposta-Atlas |
 | `Composer` | Textarea com auto-resize, Enter envia, Shift+Enter nova linha |
-| `PlanStep` | Linha de task no painel de execução (com retry e exibição de erro) |
+| `PlanStep` | Linha de task: retry, botão "▶ Executar" (developer), terminal de output |
 | `ExecutionPanel` | Painel direito: status, tarefas, artefatos, custo |
 | `AgentStrip` | Linha de agentes com status de atividade |
 
@@ -262,7 +266,37 @@ Disparado ao: criar order, receber activity log, via `scrollToBottom` callback.
 - [x] Exibição de `last_error` em tasks com falha
 - [x] Custo total por projeto no card da home
 - [x] Interface 100% em português
-- [x] Scroll automático do chat (estilo WhatsApp) — novo
+- [x] Scroll automático do chat (estilo WhatsApp)
+- [x] Dark mode automático via `prefers-color-scheme: dark` (tokens CSS)
+- [x] Animações de entrada nas mensagens, hover lift nos cards
+- [x] Spin ring no ícone de tasks em execução
+- [x] Execução de artefatos Python em sandbox isolado (`POST /api/tasks/{id}/execute`)
+- [x] Terminal inline no painel de tasks com output da execução
+
+---
+
+## Sandbox de execução
+
+O endpoint `POST /api/tasks/{task_id}/execute` executa artefatos `kind='code'` gerados pelo agente developer.
+
+**Restrições:**
+- Apenas tasks com `status='completed'` e `agent_type='developer'`
+- `python3 -I` — modo isolado (ignora site-packages do usuário)
+- Timeout de 30 segundos
+- Output truncado em 4000 chars
+- Executa em `tempfile.TemporaryDirectory` (descartado após)
+
+**Fluxo:**
+1. Backend envia `sandbox_start` via WebSocket
+2. `sandbox.run_task_artifacts()` extrai arquivos, escolhe entry point
+3. Entry point: `main.py` > `app.py` > `index.py` > `run.py` > `server.py` > primeiro `.py`
+4. Backend envia `sandbox_result` com `ok`, `output`, `exit_code`
+
+**Frontend (`sandboxes` state):**
+```javascript
+const [sandboxes, setSandboxes] = useState({})
+// { [task_id]: { status: 'running' | 'done', ok: bool, output: string } }
+```
 
 ---
 
@@ -345,9 +379,8 @@ result = await asyncio.to_thread(funcao_sincrona, arg1, arg2)
 
 ## Próximas etapas sugeridas
 
-- [ ] Redesign visual (fase adiada pelo usuário)
-- [ ] Execução real das tasks em sandbox (atualmente só gera código)
-- [ ] Histórico de execuções por task
+- [ ] Histórico de versões de artefatos por task
+- [ ] Notificações push/email ao concluir pedidos
 - [ ] Notificações push/email ao concluir pedidos
 
 ---
