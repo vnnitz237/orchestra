@@ -82,7 +82,7 @@ execution  (log de cada run de uma task)
 
 artifact   (arquivo gerado)
   id, project_id, task_id
-  kind: 'code' | 'spec' | 'test'
+  kind: 'code' | 'spec' | 'test', version
   path, content (bytea)
 ```
 
@@ -192,6 +192,13 @@ docker compose up --build
 # API:   http://localhost:8000
 ```
 
+### Testes
+```bash
+pip install -e '.[dev]'
+pytest
+cd web && npm ci && npm run build
+```
+
 ---
 
 ## Rotas da API
@@ -209,6 +216,7 @@ docker compose up --build
 | POST | `/api/tasks/{id}/retry` | Retenta task com status 'failed' |
 | POST | `/api/tasks/{id}/execute` | Executa artefatos Python em sandbox (novo) |
 | GET | `/api/projects/{id}/artifacts` | Lista artefatos |
+| GET | `/api/artifacts/{id}/versions` | Histórico de versões do artefato |
 | GET | `/api/projects/{id}/artifacts/download` | ZIP de todos artefatos |
 | GET | `/api/orders/{id}/artifacts/download` | ZIP de artefatos do pedido |
 | GET | `/api/artifacts/{id}/content` | Conteúdo texto de um artefato |
@@ -275,6 +283,7 @@ Disparado ao: criar order, receber activity log, via `scrollToBottom` callback.
 - [x] Spin ring no ícone de tasks em execução
 - [x] Execução de artefatos Python em sandbox isolado (`POST /api/tasks/{id}/execute`)
 - [x] Terminal inline no painel de tasks com output da execução
+- [x] Histórico de versões de artefatos por task, tipo e caminho
 
 ---
 
@@ -382,7 +391,7 @@ result = await asyncio.to_thread(funcao_sincrona, arg1, arg2)
 
 ## Próximas etapas sugeridas
 
-- [ ] Histórico de versões de artefatos por task
+- [x] Histórico de versões de artefatos por task
 - [ ] Notificações push/email ao concluir pedidos
 - [ ] Painel de configuração de agentes (trocar modelo por task)
 - [ ] Suporte a múltiplos usuários / autenticação

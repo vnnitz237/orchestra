@@ -49,6 +49,23 @@ async def lifespan(app: FastAPI):
         await conn.execute(
             "ALTER TABLE project ADD COLUMN IF NOT EXISTS budget_usd DECIMAL(10,2)"
         )
+        await conn.execute(
+            "ALTER TABLE artifact ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 1"
+        )
+        await conn.execute("""
+            WITH numbered AS (
+                SELECT id, ROW_NUMBER() OVER (
+                    PARTITION BY task_id, kind, path ORDER BY version, created_at, id
+                ) AS artifact_version
+                FROM artifact
+            )
+            UPDATE artifact a SET version = numbered.artifact_version
+            FROM numbered WHERE a.id = numbered.id AND a.version <> numbered.artifact_version
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS artifact_task_path_version_idx
+            ON artifact (task_id, kind, path, version)
+        """)
     asyncio.create_task(redis_relay())
     yield
     await close_pool()
@@ -259,9 +276,35 @@ async def get_order_cost(order_id: str):
 async def list_artifacts(project_id: str):
     pool = await get_pool()
     async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            "SELECT id, task_id, kind, path, created_at FROM artifact WHERE project_id=$1 ORDER BY created_at",
-            project_id)
+        rows = await conn.fetch("""
+            SELECT id, task_id, kind, path, version, created_at, version_count
+            FROM (
+                SELECT a.id, a.task_id, a.kind, a.path, a.version, a.created_at,
+                       COUNT(*) OVER (PARTITION BY a.task_id, a.kind, a.path) AS version_count,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY a.task_id, a.kind, a.path
+                           ORDER BY a.version DESC, a.created_at DESC
+                       ) AS latest_rank
+                FROM artifact a WHERE a.project_id=$1
+            ) versioned
+            WHERE latest_rank=1 ORDER BY created_at
+        """, project_id)
+        return [dict(r) for r in rows]
+
+@app.get("/api/artifacts/{artifact_id}/versions")
+async def list_artifact_versions(artifact_id: str):
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        artifact = await conn.fetchrow(
+            "SELECT task_id, kind, path FROM artifact WHERE id=$1", artifact_id)
+        if not artifact:
+            raise HTTPException(404, "Not found")
+        rows = await conn.fetch("""
+            SELECT id, task_id, kind, path, version, created_at
+            FROM artifact
+            WHERE task_id=$1 AND kind=$2 AND path=$3
+            ORDER BY version DESC
+        """, artifact['task_id'], artifact['kind'], artifact['path'])
         return [dict(r) for r in rows]
 
 def _make_zip(rows, filename: str) -> StreamingResponse:
@@ -284,9 +327,11 @@ async def download_project_artifacts(project_id: str):
         project = await conn.fetchrow("SELECT name FROM project WHERE id=$1", project_id)
         if not project:
             raise HTTPException(404, "Not found")
-        rows = await conn.fetch(
-            "SELECT path, content FROM artifact WHERE project_id=$1 ORDER BY created_at",
-            project_id)
+        rows = await conn.fetch("""
+            SELECT DISTINCT ON (task_id, kind, path) path, content
+            FROM artifact WHERE project_id=$1
+            ORDER BY task_id, kind, path, version DESC, created_at DESC
+        """, project_id)
     return _make_zip(rows, f"orchestra-{project['name']}")
 
 @app.get("/api/orders/{order_id}/artifacts/download")
@@ -297,9 +342,11 @@ async def download_order_artifacts(order_id: str):
         if not order:
             raise HTTPException(404, "Not found")
         rows = await conn.fetch("""
-            SELECT a.path, a.content FROM artifact a
+            SELECT DISTINCT ON (a.task_id, a.kind, a.path) a.path, a.content
+            FROM artifact a
             JOIN task t ON t.id = a.task_id
-            WHERE t.order_id=$1 ORDER BY a.created_at
+            WHERE t.order_id=$1
+            ORDER BY a.task_id, a.kind, a.path, a.version DESC, a.created_at DESC
         """, order_id)
     return _make_zip(rows, f"orchestra-{order['title']}")
 

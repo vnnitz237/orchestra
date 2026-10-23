@@ -8,7 +8,9 @@ async def run_task_artifacts(task_id: str) -> dict:
     pool = await get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
-            "SELECT path, content FROM artifact WHERE task_id=$1 AND kind='code'", task_id)
+            """SELECT DISTINCT ON (path) path, content
+               FROM artifact WHERE task_id=$1 AND kind='code'
+               ORDER BY path, version DESC, created_at DESC""", task_id)
 
     if not rows:
         return {"ok": False, "output": "Nenhum arquivo de código encontrado para esta task."}

@@ -85,15 +85,42 @@ function StatusPill({ status }) {
 // ─── Artifact Modal ───────────────────────────────────────────────────────────
 function ArtifactModal({ artifact, onClose }) {
   const [content, setContent] = useState('Carregando…')
+  const [versions, setVersions] = useState([])
+  const [selected, setSelected] = useState(artifact)
+
   useEffect(() => {
-    fetch(`/api/artifacts/${artifact.id}/content`)
+    setSelected(artifact)
+    fetch(`/api/artifacts/${artifact.id}/versions`)
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(setVersions).catch(() => setVersions([artifact]))
+  }, [artifact])
+
+  useEffect(() => {
+    setContent('Carregando…')
+    fetch(`/api/artifacts/${selected.id}/content`)
       .then(r => r.text()).then(setContent).catch(() => setContent('Falha ao carregar'))
-  }, [artifact.id])
+  }, [selected.id])
+
   return (
     <div className="rq-overlay" onClick={onClose}>
       <div className="rq-modal rq-modal-wide" onClick={e => e.stopPropagation()}>
         <div className="rq-modal-header">
           <span className="rq-modal-title">{artifact.path}</span>
+          {versions.length > 1 && (
+            <label className="rq-version-picker">
+              Versão
+              <select
+                value={selected.id}
+                onChange={e => setSelected(versions.find(v => v.id === e.target.value) || artifact)}
+              >
+                {versions.map(v => (
+                  <option key={v.id} value={v.id}>
+                    v{v.version} · {new Date(v.created_at).toLocaleString('pt-BR')}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <button className="rq-icon-btn" onClick={onClose} aria-label="Fechar">✕</button>
         </div>
         <pre className="rq-code-block">{content}</pre>
@@ -230,6 +257,9 @@ function ExecutionPanel({ order, tasks, cost, artifacts, projectId, onApprove, o
                   <span style={{ fontSize:11 }}>{icon}</span>
                   <span className="rq-artifact-path">{a.path}</span>
                   {a.kind !== 'code' && <span className="rq-artifact-kind">{a.kind}</span>}
+                  {Number(a.version_count) > 1 && (
+                    <span className="rq-artifact-version">v{a.version} · {a.version_count} versões</span>
+                  )}
                 </div>
               )
             })}

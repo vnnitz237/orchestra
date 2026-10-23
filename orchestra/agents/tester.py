@@ -1,5 +1,5 @@
 import anthropic, json, os, re, uuid, logging
-from orchestra.db import get_pool
+from orchestra.db import create_artifact, get_pool
 from orchestra.broadcast import broadcast
 
 logger = logging.getLogger(__name__)
@@ -143,12 +143,8 @@ async def execute_task(task_id: str, project_id: str) -> None:
 
         artifact_ids = []
         for f in files:
-            art_id = str(uuid.uuid4())
-            await conn.execute("""
-                INSERT INTO artifact (id, project_id, task_id, kind, path, content)
-                VALUES ($1,$2,$3,'test',$4,$5)
-            """, art_id, project_id, task_id, f['path'], f['content'].encode())
-            artifact_ids.append({"id": art_id, "path": f['path']})
+            artifact_ids.append(await create_artifact(
+                conn, project_id, task_id, 'test', f['path'], f['content'].encode()))
 
         await conn.execute("""
             UPDATE execution SET status='completed', output=$1, cost_usd=$2, tokens_used=$3, finished_at=NOW()

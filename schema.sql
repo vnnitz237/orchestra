@@ -58,5 +58,9 @@ CREATE TABLE IF NOT EXISTS artifact (
     kind        TEXT NOT NULL DEFAULT 'code',
     path        TEXT NOT NULL,
     content     BYTEA,
+    version     INTEGER NOT NULL DEFAULT 1,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS artifact_task_path_version_idx
+    ON artifact (task_id, kind, path, version);
